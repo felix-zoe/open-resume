@@ -6,7 +6,7 @@ pages_build_output_dir = "dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "open-resume-db"
-database_id = "local-d1-placeholder"
+database_id = "b02dc9bb-ae89-49eb-bae1-a304c4a0a83a"
 
 # 绑定 Cloudflare R2 对象存储桶
 [[r2_buckets]]
