@@ -256,6 +256,10 @@ app.post('/upload/avatar', async (c) => {
     return c.json({ code: 40003, message: '请上传有效图片文件', data: null }, 400);
   }
 
+  if (!c.env.BUCKET) {
+    return c.json({ code: 50002, message: 'R2 存储未开通，请直接使用本地图片预览', data: null }, 500);
+  }
+
   const key = `avatars/${userId}_${Date.now()}.webp`;
   const arrayBuffer = await file.arrayBuffer();
 
@@ -278,6 +282,7 @@ app.post('/upload/avatar', async (c) => {
 
 // 3.2 读取 R2 存储文件代理
 app.get('/file/*', async (c) => {
+  if (!c.env.BUCKET) return c.text('R2 Not Configured', 500);
   const key = c.req.path.replace('/api/file/', '');
   const object = await c.env.BUCKET.get(key);
 
