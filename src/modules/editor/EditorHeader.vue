@@ -17,12 +17,14 @@ import {
   Maximize2,
   Share2,
   CloudUpload,
-  Sparkles
+  Sparkles,
+  Target
 } from 'lucide-vue-next';
 
 defineEmits<{
   (e: 'toggleStyleDrawer'): void;
   (e: 'toggleTemplateModal'): void;
+  (e: 'toggleAtsModal'): void;
 }>();
 
 const resumeStore = useResumeStore();
@@ -159,6 +161,16 @@ const handleZoomReset = () => {
       >
         <Sparkles class="w-3.5 h-3.5 text-indigo-600 group-hover:rotate-12 transition transform" />
         <span>一键单页</span>
+      </button>
+
+      <!-- 目标岗位 JD 诊断 -->
+      <button
+        @click="$emit('toggleAtsModal')"
+        title="根据招聘要求诊断关键词命中率与 ATS 评分"
+        class="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1.5 rounded-lg transition shadow-2xs group cursor-pointer"
+      >
+        <Target class="w-3.5 h-3.5 text-blue-600 group-hover:scale-110 transition transform" />
+        <span class="hidden sm:inline">岗位诊断</span>
       </button>
 
       <button

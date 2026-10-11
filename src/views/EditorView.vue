@@ -8,6 +8,7 @@ import FormPanel from '../modules/editor/FormPanel.vue';
 import PreviewCanvas from '../modules/editor/PreviewCanvas.vue';
 import StyleDrawer from '../modules/editor/StyleDrawer.vue';
 import TemplateModal from '../components/TemplateModal.vue';
+import AtsModal from '../components/AtsModal.vue';
 
 const route = useRoute();
 const resumeStore = useResumeStore();
@@ -15,6 +16,7 @@ const authStore = useAuthStore();
 
 const isStyleDrawerOpen = ref(false);
 const isTemplateModalOpen = ref(false);
+const isAtsModalOpen = ref(false);
 
 onMounted(async () => {
   // 1. 若 URL query 中带了 template 参数，自动激活对应模板
@@ -52,6 +54,7 @@ onMounted(async () => {
     <EditorHeader
       @toggleStyleDrawer="isStyleDrawerOpen = true"
       @toggleTemplateModal="isTemplateModalOpen = true"
+      @toggleAtsModal="isAtsModalOpen = true"
     />
 
     <!-- 编辑器主体：左表单 + 右画板 -->
@@ -73,6 +76,12 @@ onMounted(async () => {
     <TemplateModal
       :isOpen="isTemplateModalOpen"
       @close="isTemplateModalOpen = false"
+    />
+
+    <!-- 目标岗位 JD 诊断与 ATS 评分模态框 -->
+    <AtsModal
+      :isOpen="isAtsModalOpen"
+      @close="isAtsModalOpen = false"
     />
   </div>
 </template>

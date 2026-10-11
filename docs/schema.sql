@@ -38,3 +38,15 @@ CREATE TABLE IF NOT EXISTS resume_history (
     FOREIGN KEY (resume_id) REFERENCES resumes(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_history_resume ON resume_history(resume_id);
+
+-- 4. HR 阅读足迹表 (投递反馈与阅读时长追踪)
+CREATE TABLE IF NOT EXISTS resume_visits (
+    id TEXT PRIMARY KEY,
+    resume_id TEXT NOT NULL,
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    is_downloaded INTEGER NOT NULL DEFAULT 0,
+    user_agent TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    FOREIGN KEY (resume_id) REFERENCES resumes(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_visits_resume ON resume_visits(resume_id);

@@ -221,6 +221,26 @@ app.put('/resumes/:id', async (c) => {
     resumeId
   ).run();
 
+  // 自动为重要保存留存一份快照历史 (若距上次快照超过 3 分钟)
+  try {
+    const lastSnap: any = await c.env.DB.prepare(
+      'SELECT created_at FROM resume_history WHERE resume_id = ? ORDER BY created_at DESC LIMIT 1'
+    ).bind(resumeId).first();
+    if (!lastSnap || (now - lastSnap.created_at) > 180) {
+      const historyId = `snap_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+      await c.env.DB.prepare(
+        'INSERT INTO resume_history (id, resume_id, snapshot, created_at) VALUES (?, ?, ?, ?)'
+      ).bind(historyId, resumeId, JSON.stringify({
+        title: body.title || '未命名简历',
+        templateId: body.templateId || 'classic',
+        content: body.content || {},
+        themeConfig: body.themeConfig || {}
+      }), now).run();
+    }
+  } catch (err) {
+    console.error('自动保存快照失败:', err);
+  }
+
   return c.json({
     code: 0,
     message: '保存成功',
@@ -240,6 +260,83 @@ app.delete('/resumes/:id', async (c) => {
 
   await c.env.DB.prepare('DELETE FROM resumes WHERE id = ?').bind(resumeId).run();
   return c.json({ code: 0, message: '删除成功', data: { id: resumeId } });
+});
+
+// 2.6 获取求职投递反馈与阅读足迹统计 (HR Read Analytics)
+app.get('/resumes/:id/analytics', async (c) => {
+  const userId = await getAuthUserId(c);
+  if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
+
+  const resumeId = c.req.param('id');
+  const resume: any = await c.env.DB.prepare('SELECT user_id FROM resumes WHERE id = ?').bind(resumeId).first();
+  if (!resume) return c.json({ code: 40401, message: '简历不存在', data: null }, 404);
+  if (resume.user_id !== userId) return c.json({ code: 40301, message: '无权查看该简历统计', data: null }, 403);
+
+  const stats: any = await c.env.DB.prepare(
+    'SELECT COUNT(*) as totalViews, AVG(duration_seconds) as avgDuration, SUM(is_downloaded) as totalDownloads FROM resume_visits WHERE resume_id = ?'
+  ).bind(resumeId).first();
+
+  const { results: recent } = await c.env.DB.prepare(
+    'SELECT id, duration_seconds as duration, is_downloaded as isDownloaded, created_at as createdAt FROM resume_visits WHERE resume_id = ? ORDER BY created_at DESC LIMIT 10'
+  ).bind(resumeId).all();
+
+  return c.json({
+    code: 0,
+    message: 'success',
+    data: {
+      totalViews: stats?.totalViews || 0,
+      avgDuration: Math.round(stats?.avgDuration || 0),
+      totalDownloads: stats?.totalDownloads || 0,
+      recentVisits: recent || []
+    }
+  });
+});
+
+// 2.7 获取历史版本时光机列表
+app.get('/resumes/:id/history', async (c) => {
+  const userId = await getAuthUserId(c);
+  if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
+
+  const resumeId = c.req.param('id');
+  const resume: any = await c.env.DB.prepare('SELECT user_id FROM resumes WHERE id = ?').bind(resumeId).first();
+  if (!resume || resume.user_id !== userId) return c.json({ code: 40301, message: '无权查看历史', data: null }, 403);
+
+  const { results } = await c.env.DB.prepare(
+    'SELECT id, resume_id as resumeId, created_at as createdAt FROM resume_history WHERE resume_id = ? ORDER BY created_at DESC LIMIT 15'
+  ).bind(resumeId).all();
+
+  return c.json({ code: 0, message: 'success', data: results || [] });
+});
+
+// 2.8 恢复指定的历史版本快照
+app.post('/resumes/:id/restore/:historyId', async (c) => {
+  const userId = await getAuthUserId(c);
+  if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
+
+  const resumeId = c.req.param('id');
+  const historyId = c.req.param('historyId');
+
+  const resume: any = await c.env.DB.prepare('SELECT user_id FROM resumes WHERE id = ?').bind(resumeId).first();
+  if (!resume || resume.user_id !== userId) return c.json({ code: 40301, message: '无权操作', data: null }, 403);
+
+  const hist: any = await c.env.DB.prepare('SELECT snapshot FROM resume_history WHERE id = ? AND resume_id = ?').bind(historyId, resumeId).first();
+  if (!hist) return c.json({ code: 40401, message: '历史版本不存在', data: null }, 404);
+
+  const data = JSON.parse(hist.snapshot);
+  const now = Math.floor(Date.now() / 1000);
+
+  await c.env.DB.prepare(
+    'UPDATE resumes SET title = ?, template_id = ?, content = ?, theme_config = ?, updated_at = ? WHERE id = ?'
+  ).bind(
+    data.title || '未命名简历',
+    data.templateId || 'classic',
+    JSON.stringify(data.content || {}),
+    JSON.stringify(data.themeConfig || {}),
+    now,
+    resumeId
+  ).run();
+
+  return c.json({ code: 0, message: '版本恢复成功', data: { updatedAt: now } });
 });
 
 // ======================= 3. 对象存储上传 (Cloudflare R2) =======================
@@ -294,6 +391,48 @@ app.get('/file/*', async (c) => {
   headers.set('Cache-Control', 'public, max-age=31536000');
 
   return new Response(object.body, { headers });
+});
+
+// ======================= 4. 只读公开分享与 HR 访客追踪 =======================
+
+// 4.1 获取公开只读简历数据 (HR 浏览)
+app.get('/share/:id', async (c) => {
+  const resumeId = c.req.param('id');
+  const resume: any = await c.env.DB.prepare(
+    'SELECT id, title, template_id, content, theme_config, is_public, updated_at FROM resumes WHERE id = ?'
+  ).bind(resumeId).first();
+
+  if (!resume) return c.json({ code: 40401, message: '简历不存在', data: null }, 404);
+
+  return c.json({
+    code: 0,
+    message: 'success',
+    data: {
+      id: resume.id,
+      title: resume.title,
+      templateId: resume.template_id,
+      content: JSON.parse(resume.content || '{}'),
+      themeConfig: JSON.parse(resume.theme_config || '{}'),
+      isPublic: resume.is_public,
+      updatedAt: resume.updated_at
+    }
+  });
+});
+
+// 4.2 上报访客阅读足迹与行为心跳 (免登录)
+app.post('/share/:id/visit', async (c) => {
+  const resumeId = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const duration = Number(body.duration || 0);
+  const isDownloaded = body.isDownloaded ? 1 : 0;
+  const userAgent = c.req.header('User-Agent') || 'Unknown';
+  const visitId = `v_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+
+  await c.env.DB.prepare(
+    'INSERT INTO resume_visits (id, resume_id, duration_seconds, is_downloaded, user_agent) VALUES (?, ?, ?, ?, ?)'
+  ).bind(visitId, resumeId, duration, isDownloaded, userAgent).run();
+
+  return c.json({ code: 0, message: 'ok', data: { visitId } });
 });
 
 // 导出 Cloudflare Pages Functions 处理入口
