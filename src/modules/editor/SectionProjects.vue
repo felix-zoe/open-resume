@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useResumeStore } from '../../stores/resume';
 import { ProjectItem } from '../../types/resume';
-import { Plus, Trash2 } from 'lucide-vue-next';
+import { Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-vue-next';
 
 const resumeStore = useResumeStore();
 const projectModule = resumeStore.content.modules.projects;
@@ -22,6 +22,23 @@ const addProjectItem = () => {
 const removeProjectItem = (index: number) => {
   projectModule.items.splice(index, 1);
 };
+
+const moveProjectItem = (index: number, direction: 'up' | 'down') => {
+  const target = direction === 'up' ? index - 1 : index + 1;
+  if (target >= 0 && target < projectModule.items.length) {
+    const temp = projectModule.items[index];
+    projectModule.items[index] = projectModule.items[target];
+    projectModule.items[target] = temp;
+  }
+};
+
+const insertSnippet = (item: ProjectItem, templateText: string) => {
+  if (!item.description || item.description.trim() === '') {
+    item.description = templateText;
+  } else {
+    item.description += `\n${templateText}`;
+  }
+};
 </script>
 
 <template>
@@ -31,13 +48,32 @@ const removeProjectItem = (index: number) => {
       :key="item.id"
       class="bg-gray-50/70 p-3 rounded-lg border border-gray-200 relative group transition hover:border-gray-300"
     >
-      <button
-        @click="removeProjectItem(idx)"
-        title="删除此项目"
-        class="absolute right-3 top-3 text-gray-400 hover:text-rose-500 transition p-1 rounded"
-      >
-        <Trash2 class="w-3.5 h-3.5" />
-      </button>
+      <!-- 操作按钮组 -->
+      <div class="absolute right-3 top-3 flex items-center gap-1">
+        <button
+          v-if="idx > 0"
+          @click="moveProjectItem(idx, 'up')"
+          title="上移此项目"
+          class="text-gray-400 hover:text-gray-700 transition p-1 rounded"
+        >
+          <ArrowUp class="w-3.5 h-3.5" />
+        </button>
+        <button
+          v-if="idx < projectModule.items.length - 1"
+          @click="moveProjectItem(idx, 'down')"
+          title="下移此项目"
+          class="text-gray-400 hover:text-gray-700 transition p-1 rounded"
+        >
+          <ArrowDown class="w-3.5 h-3.5" />
+        </button>
+        <button
+          @click="removeProjectItem(idx)"
+          title="删除此项目"
+          class="text-gray-400 hover:text-rose-500 transition p-1 rounded ml-1"
+        >
+          <Trash2 class="w-3.5 h-3.5" />
+        </button>
+      </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-2.5 pr-8">
         <div>
@@ -100,6 +136,25 @@ const removeProjectItem = (index: number) => {
           placeholder="介绍项目定位、采用的技术方案及攻坚的技术难点与收益..."
           class="w-full px-2.5 py-1.5 text-xs bg-white border border-gray-200 rounded focus:border-blue-500 outline-none font-sans leading-relaxed"
         ></textarea>
+
+        <!-- 快捷项目句式推荐 -->
+        <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span class="text-[10px] text-gray-400">快捷句式:</span>
+          <button
+            type="button"
+            @click="insertSnippet(item, '• 项目难点：面对 [高并发/复杂交互/海量数据] 挑战，设计并落地 [架构方案]。')"
+            class="text-[10px] text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200/60 px-1.5 py-0.5 rounded transition"
+          >
+            + 架构难点攻关
+          </button>
+          <button
+            type="button"
+            @click="insertSnippet(item, '• 核心收益：项目上线后支撑 [XX] 业务场景，交付周期缩短 [40%]，好评率达 [98%]。')"
+            class="text-[10px] text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 px-1.5 py-0.5 rounded transition"
+          >
+            + 量化业务收益
+          </button>
+        </div>
       </div>
     </div>
 

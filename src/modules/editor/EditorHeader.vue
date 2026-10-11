@@ -16,7 +16,8 @@ import {
   ZoomOut,
   Maximize2,
   Share2,
-  CloudUpload
+  CloudUpload,
+  Sparkles
 } from 'lucide-vue-next';
 
 defineEmits<{
@@ -28,6 +29,15 @@ const resumeStore = useResumeStore();
 const authStore = useAuthStore();
 const isEditingTitle = ref(false);
 const isAuthModalOpen = ref(false);
+const autoFitToast = ref<string | null>(null);
+
+const handleAutoFit = () => {
+  const res = resumeStore.autoFitOnePage();
+  autoFitToast.value = res.message;
+  setTimeout(() => {
+    autoFitToast.value = null;
+  }, 3500);
+};
 
 const handleShare = () => {
   const shareUrl = `${window.location.origin}/share/${resumeStore.id}`;
@@ -141,6 +151,16 @@ const handleZoomReset = () => {
         <span class="hidden sm:inline">切换模板</span>
       </button>
 
+      <!-- 智能一键卡页神器 -->
+      <button
+        @click="handleAutoFit"
+        title="算法自动解算最佳间距与字号，完美将内容收敛至单页 A4"
+        class="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg transition shadow-2xs group"
+      >
+        <Sparkles class="w-3.5 h-3.5 text-indigo-600 group-hover:rotate-12 transition transform" />
+        <span>一键单页</span>
+      </button>
+
       <button
         @click="$emit('toggleStyleDrawer')"
         class="inline-flex items-center gap-1 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 px-2.5 py-1.5 rounded-lg transition"
@@ -183,5 +203,23 @@ const handleZoomReset = () => {
       @close="isAuthModalOpen = false"
       @success="resumeStore.saveResume"
     />
+
+    <!-- 智能卡页 Toast 提示浮层 -->
+    <transition
+      enter-active-class="transition duration-300 ease-out"
+      enter-from-class="opacity-0 -translate-y-2"
+      enter-to-class="opacity-100 translate-y-0"
+      leave-active-class="transition duration-200 ease-in"
+      leave-from-class="opacity-100 translate-y-0"
+      leave-to-class="opacity-0 -translate-y-2"
+    >
+      <div
+        v-if="autoFitToast"
+        class="fixed top-16 left-1/2 -translate-x-1/2 bg-slate-900/95 text-white px-4 py-2 rounded-xl shadow-xl text-xs font-medium z-50 flex items-center gap-2 backdrop-blur-sm border border-slate-700/50"
+      >
+        <Sparkles class="w-4 h-4 text-amber-400" />
+        <span>{{ autoFitToast }}</span>
+      </div>
+    </transition>
   </header>
 </template>

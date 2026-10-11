@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { useResumeStore } from '../../stores/resume';
-import { X, Check } from 'lucide-vue-next';
+import { X, Check, Sparkles } from 'lucide-vue-next';
 
 defineProps<{
   isOpen: boolean;
@@ -11,6 +12,17 @@ const emit = defineEmits<{
 }>();
 
 const resumeStore = useResumeStore();
+const drawerFeedback = ref<string | null>(null);
+const drawerSuccess = ref(true);
+
+const triggerAutoFitInDrawer = () => {
+  const res = resumeStore.autoFitOnePage();
+  drawerFeedback.value = res.message;
+  drawerSuccess.value = res.success;
+  setTimeout(() => {
+    drawerFeedback.value = null;
+  }, 4000);
+};
 
 // 预设主题色系
 const PRESET_COLORS = [
@@ -43,6 +55,30 @@ const PRESET_COLORS = [
 
         <!-- 设置项表单 -->
         <div class="flex-1 overflow-y-auto p-5 space-y-6 text-xs text-gray-700">
+          <!-- 0. 智能一键卡页算法入口 -->
+          <div class="p-3.5 rounded-xl bg-gradient-to-br from-indigo-50 via-blue-50 to-purple-50 border border-indigo-100 shadow-2xs">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="font-bold text-indigo-950 flex items-center gap-1.5">
+                <Sparkles class="w-4 h-4 text-indigo-600" />
+                <span>智能一键卡页 (Auto-Fit)</span>
+              </span>
+              <span class="text-[10px] bg-indigo-600 text-white font-medium px-1.5 py-0.5 rounded-full">独家算法</span>
+            </div>
+            <p class="text-[11px] text-indigo-800/80 mb-2.5 leading-relaxed">
+              根据经历内容自动解算最佳间距、行高与字号阶梯组合，1 秒完美消除超页或空白。
+            </p>
+            <button
+              @click="triggerAutoFitInDrawer"
+              class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-xs shadow-sm hover:shadow transition flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Sparkles class="w-3.5 h-3.5" />
+              <span>立即自动排版至单页</span>
+            </button>
+            <p v-if="drawerFeedback" class="mt-2 text-[11px] text-center font-medium" :class="drawerSuccess ? 'text-emerald-600' : 'text-amber-600'">
+              {{ drawerFeedback }}
+            </p>
+          </div>
+
           <!-- 1. 主题强调色 -->
           <div>
             <label class="block font-semibold text-gray-900 mb-2">主题强调色</label>

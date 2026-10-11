@@ -101,6 +101,65 @@ export const useResumeStore = defineStore('resume', () => {
     triggerAutoSave();
   }
 
+  // 智能卡页（Auto-Fit）算法：自动解算最佳间距与字号，完美将内容收敛至单页 A4
+  function autoFitOnePage(currentHeight?: number): { success: boolean; message: string } {
+    const targetHeight = 1120; // A4 纸 96DPI 标准高度 1123px，留出 3px 缓冲
+    const height = currentHeight || (document.querySelector('.a4-print-target')?.clientHeight || 1123);
+
+    // 1. 内容溢出超页：自适应收紧
+    if (height > targetHeight) {
+      const overflowRatio = (height - targetHeight) / targetHeight;
+      if (overflowRatio > 0.45) {
+        return {
+          success: false,
+          message: '当前经历内容超出 1 页较多，建议精简经历或分为两页呈现'
+        };
+      }
+
+      if (overflowRatio > 0.25) {
+        themeConfig.value.fontSize = Math.max(12.5, themeConfig.value.fontSize - 1);
+        themeConfig.value.lineHeight = Math.max(1.35, Number((themeConfig.value.lineHeight - 0.1).toFixed(2)));
+        themeConfig.value.sectionSpacing = Math.max(10, themeConfig.value.sectionSpacing - 6);
+        themeConfig.value.paragraphSpacing = Math.max(3, themeConfig.value.paragraphSpacing - 3);
+        themeConfig.value.pagePadding = Math.max(14, themeConfig.value.pagePadding - 3);
+      } else if (overflowRatio > 0.1) {
+        themeConfig.value.fontSize = Math.max(13, themeConfig.value.fontSize - 0.5);
+        themeConfig.value.lineHeight = Math.max(1.4, Number((themeConfig.value.lineHeight - 0.05).toFixed(2)));
+        themeConfig.value.sectionSpacing = Math.max(12, themeConfig.value.sectionSpacing - 4);
+        themeConfig.value.paragraphSpacing = Math.max(4, themeConfig.value.paragraphSpacing - 2);
+        themeConfig.value.pagePadding = Math.max(16, themeConfig.value.pagePadding - 2);
+      } else {
+        // 轻微超页（溢出 < 10%），收拢模块与段落间距即可消除跨页
+        themeConfig.value.sectionSpacing = Math.max(10, themeConfig.value.sectionSpacing - 4);
+        themeConfig.value.paragraphSpacing = Math.max(3, themeConfig.value.paragraphSpacing - 2);
+      }
+      triggerAutoSave();
+      return {
+        success: true,
+        message: '已智能压缩微调，成功收敛至标准单页！'
+      };
+    }
+
+    // 2. 内容偏少（下半部大面积空白）：自适应丰满排版
+    if (height < 920) {
+      themeConfig.value.fontSize = Math.min(15, themeConfig.value.fontSize + 0.5);
+      themeConfig.value.lineHeight = Math.min(1.65, Number((themeConfig.value.lineHeight + 0.05).toFixed(2)));
+      themeConfig.value.sectionSpacing = Math.min(24, themeConfig.value.sectionSpacing + 6);
+      themeConfig.value.paragraphSpacing = Math.min(10, themeConfig.value.paragraphSpacing + 3);
+      themeConfig.value.pagePadding = Math.min(24, themeConfig.value.pagePadding + 2);
+      triggerAutoSave();
+      return {
+        success: true,
+        message: '已自动丰满排版，单页视觉更充实！'
+      };
+    }
+
+    return {
+      success: true,
+      message: '当前经历正处于黄金单页排版比例，无需调整。'
+    };
+  }
+
   // 监听内容与样式变更，自动进入防抖倒计时
   watch([content, themeConfig, title, templateId], () => {
     triggerAutoSave();
@@ -117,6 +176,7 @@ export const useResumeStore = defineStore('resume', () => {
     lastSavedTime,
     saveResume,
     resetToPreset,
-    clearAllData
+    clearAllData,
+    autoFitOnePage
   };
 });
