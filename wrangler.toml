@@ -14,5 +14,9 @@ binding = "BUCKET"
 bucket_name = "common-bucket"
 preview_bucket_name = "common-bucket"
 
+# 绑定 Cloudflare Browser Run (Headless Chromium 渲染服务)
+[browser]
+binding = "MYBROWSER"
+
 [vars]
 JWT_SECRET = "57c22646748044a04c52b5e9b7602fbb877103e18b8b05e43e00d94024c91a4f"

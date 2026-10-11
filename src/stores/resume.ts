@@ -103,8 +103,8 @@ export const useResumeStore = defineStore('resume', () => {
 
   // 智能卡页（Auto-Fit）算法：自动解算最佳间距与字号，完美将内容收敛至单页 A4
   function autoFitOnePage(currentHeight?: number): { success: boolean; message: string } {
-    const targetHeight = 1120; // A4 纸 96DPI 标准高度 1123px，留出 3px 缓冲
-    const height = currentHeight || (document.querySelector('.a4-print-target')?.clientHeight || 1123);
+    const targetHeight = 1115; // A4 纸 96DPI 标准高度 1122.52px，设为 1115px 预留安全缓冲
+    const height = currentHeight || (document.querySelector('.a4-print-target')?.clientHeight || 1115);
 
     // 1. 内容溢出超页：自适应收紧
     if (height > targetHeight) {

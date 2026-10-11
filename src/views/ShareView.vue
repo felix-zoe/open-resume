@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
-import { triggerPrintPdf } from '../utils/exportPdf';
+import { exportResumePdf } from '../utils/exportPdf';
 import { ResumeContent, ThemeConfig } from '../types/resume';
 import { DEFAULT_RESUME_CONTENT, DEFAULT_THEME_CONFIG } from '../utils/presets';
 import ClassicTemplate from '../templates/ClassicTemplate.vue';
@@ -14,6 +14,7 @@ const resumeId = route.params.id as string;
 
 const loading = ref(true);
 const notFound = ref(false);
+const isExporting = ref(false);
 const title = ref('个人简历');
 const templateId = ref('classic');
 const content = ref<ResumeContent>(JSON.parse(JSON.stringify(DEFAULT_RESUME_CONTENT)));
@@ -41,9 +42,15 @@ const reportVisit = (isDownloaded = false) => {
   }
 };
 
-const handlePrint = () => {
+const handlePrint = async () => {
+  if (isExporting.value) return;
+  isExporting.value = true;
   reportVisit(true);
-  triggerPrintPdf(title.value);
+  try {
+    await exportResumePdf(title.value);
+  } finally {
+    isExporting.value = false;
+  }
 };
 
 const currentTemplateComponent = computed(() => {
@@ -116,11 +123,12 @@ onUnmounted(() => {
 
         <button
           @click="handlePrint"
-          :disabled="loading || notFound"
-          class="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-3.5 py-1.5 rounded-lg shadow-sm hover:shadow transition cursor-pointer"
+          :disabled="loading || notFound || isExporting"
+          class="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-wait px-3.5 py-1.5 rounded-lg shadow-sm hover:shadow transition cursor-pointer"
         >
-          <Download class="w-3.5 h-3.5" />
-          <span>另存为超清 PDF</span>
+          <Loader2 v-if="isExporting" class="w-3.5 h-3.5 animate-spin" />
+          <Download v-else class="w-3.5 h-3.5" />
+          <span>{{ isExporting ? '生成 PDF...' : '另存为超清 PDF' }}</span>
         </button>
       </div>
     </header>

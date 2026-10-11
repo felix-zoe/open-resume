@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { handle } from 'hono/cloudflare-pages';
 import { cors } from 'hono/cors';
 import { sign, verify } from 'hono/jwt';
+import puppeteer from '@cloudflare/puppeteer';
 import { Env } from '../types';
 
 const app = new Hono<{ Bindings: Env }>().basePath('/api');
@@ -435,5 +436,73 @@ app.post('/share/:id/visit', async (c) => {
   return c.json({ code: 0, message: 'ok', data: { visitId } });
 });
 
+// ======================= 5. 云端无头渲染导出模块 (PDF Export) =======================
+
+// 5.1 云端极速生成高清矢量 PDF
+app.post('/export-pdf', async (c) => {
+  const { html, title } = await c.req.json().catch(() => ({}));
+  if (!html) {
+    return c.json({ code: 40001, message: 'HTML 内容不能为空', data: null }, 400);
+  }
+
+  // 检查是否具备 Cloudflare Browser Run 绑定
+  if (!c.env.MYBROWSER) {
+    return c.json({
+      code: 501,
+      message: 'Cloudflare Browser Rendering 绑定未配置，请使用本地原生打印或在 Dashboard 开启 Browser Run',
+      data: null
+    }, 501);
+  }
+
+  let browser: any;
+  try {
+    // 启动 Cloudflare 边缘无头 Chromium 实例
+    browser = await puppeteer.launch(c.env.MYBROWSER);
+    const page = await browser.newPage();
+
+    // 设定 210mm A4 视口与屏幕 DPR
+    await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 2 });
+
+    // 注入页面 HTML
+    await page.setContent(html, {
+      waitUntil: 'load'
+    });
+
+    // 等待字体就绪
+    await page.evaluateHandle('document.fonts.ready');
+
+    // 导出标准 A4 矢量 PDF
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+      preferCSSPageSize: true
+    });
+
+    await browser.close();
+
+    const fileName = (title || '简历').replace(/[\\/:*?"<>|]/g, '_');
+
+    return new Response(pdfBuffer, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}.pdf"`,
+        'Cache-Control': 'no-cache'
+      }
+    });
+  } catch (err: any) {
+    if (browser) {
+      try { await browser.close(); } catch {}
+    }
+    console.error('云端 PDF 导出失败:', err);
+    return c.json({
+      code: 50001,
+      message: err.message || '云端无头渲染生成失败',
+      data: null
+    }, 500);
+  }
+});
+
 // 导出 Cloudflare Pages Functions 处理入口
 export const onRequest = handle(app);
+

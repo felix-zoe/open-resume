@@ -20,6 +20,7 @@
     "vue-router": "^4.4.5"
   },
   "devDependencies": {
+    "@cloudflare/puppeteer": "^1.4.0",
     "@cloudflare/workers-types": "^4.20241018.0",
     "@types/node": "^26.6.3",
     "@vitejs/plugin-vue": "^5.1.4",

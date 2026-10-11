@@ -9,8 +9,8 @@ const resumeStore = useResumeStore();
 const paperRef = ref<HTMLElement | null>(null);
 const contentHeight = ref<number>(0);
 
-// A4 纸张在 96 DPI 下的物理像素高度约为 1123px
-const A4_HEIGHT_PX = 1123;
+// A4 纸张在 96 DPI 下物理高度为 1122.52px，设为 1115px（预留 7.5px 安全呼吸间距，防止亚像素微差导致超出一页）
+const A4_HEIGHT_PX = 1115;
 
 // 动态匹配模板组件
 const currentTemplateComponent = computed(() => {

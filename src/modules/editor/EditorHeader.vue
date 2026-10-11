@@ -2,10 +2,11 @@
 import { ref } from 'vue';
 import { useResumeStore } from '../../stores/resume';
 import { useAuthStore } from '../../stores/auth';
-import { triggerPrintPdf } from '../../utils/exportPdf';
+import { exportResumePdf } from '../../utils/exportPdf';
 import AuthModal from '../../components/AuthModal.vue';
 import {
   Download,
+  Loader2,
   Palette,
   LayoutTemplate,
   RotateCcw,
@@ -31,6 +32,7 @@ const resumeStore = useResumeStore();
 const authStore = useAuthStore();
 const isEditingTitle = ref(false);
 const isAuthModalOpen = ref(false);
+const isExporting = ref(false);
 const autoFitToast = ref<string | null>(null);
 
 const handleAutoFit = () => {
@@ -50,8 +52,21 @@ const handleShare = () => {
   });
 };
 
-const handleExport = () => {
-  triggerPrintPdf(resumeStore.title);
+const handleExport = async () => {
+  if (isExporting.value) return;
+  isExporting.value = true;
+  autoFitToast.value = '⚡ 正在准备生成高清矢量 PDF...';
+  try {
+    const res = await exportResumePdf(resumeStore.title);
+    autoFitToast.value = res.message;
+  } catch (err: any) {
+    autoFitToast.value = '导出遇到问题，已尝试平滑兜底';
+  } finally {
+    isExporting.value = false;
+    setTimeout(() => {
+      autoFitToast.value = null;
+    }, 4000);
+  }
 };
 
 const handleZoomIn = () => {
@@ -202,10 +217,12 @@ const handleZoomReset = () => {
       <!-- 核心导出 PDF 按钮 -->
       <button
         @click="handleExport"
-        class="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3.5 py-1.5 rounded-lg shadow-sm hover:shadow transition"
+        :disabled="isExporting"
+        class="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-75 disabled:cursor-wait px-3.5 py-1.5 rounded-lg shadow-sm hover:shadow transition"
       >
-        <Download class="w-4 h-4" />
-        <span>导出 PDF</span>
+        <Loader2 v-if="isExporting" class="w-4 h-4 animate-spin" />
+        <Download v-else class="w-4 h-4" />
+        <span>{{ isExporting ? '生成 PDF...' : '导出 PDF' }}</span>
       </button>
     </div>
 
