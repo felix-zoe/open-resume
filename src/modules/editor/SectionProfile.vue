@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { useResumeStore } from '../../stores/resume';
 import { useAuthStore } from '../../stores/auth';
 import { User, Mail, Phone, MapPin, Globe, Github, Image as ImageIcon, Loader2 } from 'lucide-vue-next';
 
 const resumeStore = useResumeStore();
 const authStore = useAuthStore();
-const profile = resumeStore.content.profile;
+// 使用计算属性时刻绑定 store 最新内容，彻底解决对象替换后的响应式断链
+const profile = computed(() => resumeStore.content.profile);
 
 const isUploading = ref(false);
 
@@ -39,8 +40,8 @@ const handleAvatarFile = async (e: Event) => {
 
       const json = (await res.json()) as { code?: number; message?: string; data?: { url?: string } };
       if (res.ok && json.code === 0 && json.data?.url) {
-        profile.avatar = json.data.url;
-        profile.showAvatar = true;
+        profile.value.avatar = json.data.url;
+        profile.value.showAvatar = true;
       } else {
         alert(json.message || '上传头像至云端失败，已保留本地预览');
         fallbackToBase64(file);
@@ -63,8 +64,8 @@ const handleAvatarFile = async (e: Event) => {
 const fallbackToBase64 = (file: File) => {
   const reader = new FileReader();
   reader.onload = (uploadEvent) => {
-    profile.avatar = uploadEvent.target?.result as string;
-    profile.showAvatar = true;
+    profile.value.avatar = uploadEvent.target?.result as string;
+    profile.value.showAvatar = true;
   };
   reader.readAsDataURL(file);
 };

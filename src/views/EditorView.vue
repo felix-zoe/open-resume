@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useResumeStore } from '../stores/resume';
 import { useAuthStore } from '../stores/auth';
@@ -18,16 +18,39 @@ const isStyleDrawerOpen = ref(false);
 const isTemplateModalOpen = ref(false);
 const isAtsModalOpen = ref(false);
 
-onMounted(async () => {
-  // 1. 若 URL query 中带了 template 参数，自动激活对应模板
-  if (route.query.template && typeof route.query.template === 'string') {
-    resumeStore.templateId = route.query.template;
-  }
+// 监听路由参数 ID 变化，作为统一入口加载指定简历
+watch(
+  () => route.params.id,
+  async (newId) => {
+    const resumeId = (newId as string) || 'local-draft';
 
-  // 2. 若进入的是指定简历 ID 且已登录，拉取云端数据
-  const resumeId = route.params.id as string;
-  if (resumeId && resumeId !== 'demo' && resumeId !== 'local-draft') {
+    // 1. 若 URL query 中带了 template 参数，预设模板
+    if (route.query.template && typeof route.query.template === 'string') {
+      resumeStore.templateId = route.query.template;
+    }
+
+    // 2. Demo 示例演示路径
+    if (resumeId === 'demo') {
+      resumeStore.resetToPreset();
+      resumeStore.id = 'demo';
+      return;
+    }
+
+    // 3. 纯本地草稿路径
+    if (resumeId === 'local-draft') {
+      const restored = resumeStore.loadLocalDraft('local-draft');
+      if (!restored) {
+        resumeStore.resetToPreset();
+        resumeStore.id = 'local-draft';
+      }
+      return;
+    }
+
+    // 4. 具名或云端简历：先读本地缓存草稿保底响应
     resumeStore.id = resumeId;
+    resumeStore.loadLocalDraft(resumeId);
+
+    // 5. 若已登录，从云端拉取权威数据
     if (authStore.isLoggedIn) {
       try {
         const res = await fetch(`/api/resumes/${resumeId}`, {
@@ -35,17 +58,21 @@ onMounted(async () => {
         });
         const data: any = await res.json();
         if (data.code === 0 && data.data) {
-          resumeStore.title = data.data.title || resumeStore.title;
-          resumeStore.templateId = data.data.templateId || resumeStore.templateId;
-          resumeStore.content = data.data.content || resumeStore.content;
-          resumeStore.themeConfig = data.data.themeConfig || resumeStore.themeConfig;
+          resumeStore.loadResumeData({
+            id: resumeId,
+            title: data.data.title,
+            templateId: data.data.templateId,
+            content: data.data.content,
+            themeConfig: data.data.themeConfig
+          });
         }
       } catch (err) {
         console.error('拉取云端简历数据失败:', err);
       }
     }
-  }
-});
+  },
+  { immediate: true }
+);
 </script>
 
 <template>

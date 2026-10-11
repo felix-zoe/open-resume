@@ -62,23 +62,28 @@ const currentTemplateComponent = computed(() => {
   }
 });
 
+const errorMsg = ref('该在线简历不存在或已关闭分享');
+
 onMounted(async () => {
   // 1. 若非 demo 则请求云端公开接口
   if (resumeId && resumeId !== 'demo' && resumeId !== 'local-draft') {
     try {
       const res = await fetch(`/api/share/${resumeId}`);
-      if (!res.ok) {
+      const json: any = await res.json().catch(() => ({}));
+      if (!res.ok || json.code !== 0) {
         notFound.value = true;
-      } else {
-        const json: any = await res.json();
-        if (json.code === 0 && json.data) {
-          title.value = json.data.title || '个人简历';
-          templateId.value = json.data.templateId || 'classic';
-          content.value = json.data.content || content.value;
-          themeConfig.value = json.data.themeConfig || themeConfig.value;
+        if (res.status === 403 || json.code === 40301) {
+          errorMsg.value = '该简历暂未开启公开分享，请联系求职者开启后查阅';
         } else {
-          notFound.value = true;
+          errorMsg.value = '该在线简历不存在或已失效';
         }
+      } else if (json.data) {
+        title.value = json.data.title || '个人简历';
+        templateId.value = json.data.templateId || 'classic';
+        content.value = json.data.content || content.value;
+        themeConfig.value = json.data.themeConfig || themeConfig.value;
+      } else {
+        notFound.value = true;
       }
     } catch {
       notFound.value = true;
@@ -144,8 +149,8 @@ onUnmounted(() => {
       <div class="w-12 h-12 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center mx-auto mb-3">
         <AlertCircle class="w-6 h-6" />
       </div>
-      <h3 class="text-base font-bold text-slate-800">该在线简历不存在或已关闭分享</h3>
-      <p class="text-xs text-slate-400 mt-1">求职者可能已更新链接或关闭了该在线版本的只读权限。</p>
+      <h3 class="text-base font-bold text-slate-800">{{ errorMsg }}</h3>
+      <p class="text-xs text-slate-400 mt-1">求职者可能已更新链接或更改了该在线版本的分享权限。</p>
       <div class="mt-5">
         <router-link to="/" class="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline">
           <span>返回 OpenResume 首页</span>

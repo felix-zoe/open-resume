@@ -10,13 +10,75 @@ const app = new Hono<{ Bindings: Env }>().basePath('/api');
 // 全局 CORS 中间件
 app.use('*', cors());
 
-// 工具：密码哈希 (基于 Web Crypto API SHA-256)
-async function hashPassword(password: string): Promise<string> {
+// 工具：密码哈希 (基于 Web Crypto API PBKDF2 100,000 次迭代，每用户独立随机盐)
+async function hashPasswordPBKDF2(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits']
+  );
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations: 100000,
+      hash: 'SHA-256'
+    },
+    keyMaterial,
+    256
+  );
+  const hashHex = Array.from(new Uint8Array(derivedBits)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `pbkdf2:100000:${saltHex}:${hashHex}`;
+}
+
+// 密码校验：支持 PBKDF2 与旧版固定盐 SHA-256 平滑升级
+async function verifyPassword(password: string, storedHash: string): Promise<{ isValid: boolean; needsUpgrade: boolean }> {
+  if (storedHash.startsWith('pbkdf2:')) {
+    const parts = storedHash.split(':');
+    if (parts.length === 4) {
+      const iterations = parseInt(parts[1], 10) || 100000;
+      const saltHex = parts[2];
+      const expectedHashHex = parts[3];
+      const saltMatch = saltHex.match(/.{1,2}/g);
+      if (!saltMatch) return { isValid: false, needsUpgrade: false };
+      const salt = new Uint8Array(saltMatch.map(byte => parseInt(byte, 16)));
+      const encoder = new TextEncoder();
+      const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(password),
+        { name: 'PBKDF2' },
+        false,
+        ['deriveBits']
+      );
+      const derivedBits = await crypto.subtle.deriveBits(
+        {
+          name: 'PBKDF2',
+          salt,
+          iterations,
+          hash: 'SHA-256'
+        },
+        keyMaterial,
+        256
+      );
+      const hashHex = Array.from(new Uint8Array(derivedBits)).map(b => b.toString(16).padStart(2, '0')).join('');
+      return { isValid: hashHex === expectedHashHex, needsUpgrade: false };
+    }
+  }
+
+  // 兼容旧版 SHA-256 加固定盐
   const encoder = new TextEncoder();
   const data = encoder.encode(password + 'open_resume_salt_2026');
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  const legacyHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+  if (legacyHash === storedHash) {
+    return { isValid: true, needsUpgrade: true };
+  }
+  return { isValid: false, needsUpgrade: false };
 }
 
 // 鉴权中间件辅助函数
@@ -38,7 +100,7 @@ async function getAuthUserId(c: any): Promise<string | null> {
 app.post('/auth/register', async (c) => {
   const { email, password, nickname } = await c.req.json();
   if (!email || !password || password.length < 6) {
-    return c.json({ code: 40001, message: '邮箱或密码不符合规范', data: null }, 400);
+    return c.json({ code: 40001, message: '邮箱或密码不符合规范（密码至少6位）', data: null }, 400);
   }
 
   const existing = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
@@ -47,7 +109,7 @@ app.post('/auth/register', async (c) => {
   }
 
   const userId = `usr_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-  const passwordHash = await hashPassword(password);
+  const passwordHash = await hashPasswordPBKDF2(password);
   const userNick = nickname || email.split('@')[0];
 
   await c.env.DB.prepare(
@@ -76,13 +138,27 @@ app.post('/auth/login', async (c) => {
     return c.json({ code: 40001, message: '邮箱与密码不能为空', data: null }, 400);
   }
 
-  const passwordHash = await hashPassword(password);
-  const user = await c.env.DB.prepare(
-    'SELECT id, email, nickname, avatar_url FROM users WHERE email = ? AND password_hash = ?'
-  ).bind(email, passwordHash).first();
+  const user: any = await c.env.DB.prepare(
+    'SELECT id, email, nickname, avatar_url, password_hash FROM users WHERE email = ?'
+  ).bind(email).first();
 
   if (!user) {
     return c.json({ code: 40103, message: '账号或密码错误', data: null }, 401);
+  }
+
+  const { isValid, needsUpgrade } = await verifyPassword(password, user.password_hash);
+  if (!isValid) {
+    return c.json({ code: 40103, message: '账号或密码错误', data: null }, 401);
+  }
+
+  // 若为旧格式密码哈希，平滑自动升级为 PBKDF2
+  if (needsUpgrade) {
+    try {
+      const upgradedHash = await hashPasswordPBKDF2(password);
+      await c.env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(upgradedHash, user.id).run();
+    } catch (err) {
+      console.error('密码哈希升级失败:', err);
+    }
   }
 
   const token = await sign(
@@ -206,18 +282,21 @@ app.put('/resumes/:id', async (c) => {
   const resumeId = c.req.param('id');
   const body = await c.req.json();
 
-  const existing: any = await c.env.DB.prepare('SELECT user_id FROM resumes WHERE id = ?').bind(resumeId).first();
+  const existing: any = await c.env.DB.prepare('SELECT user_id, is_public FROM resumes WHERE id = ?').bind(resumeId).first();
   if (!existing) return c.json({ code: 40401, message: '简历不存在', data: null }, 404);
   if (existing.user_id !== userId) return c.json({ code: 40301, message: '无权修改该简历', data: null }, 403);
 
   const now = Math.floor(Date.now() / 1000);
+  const isPublicVal = typeof body.isPublic === 'number' ? body.isPublic : (body.isPublic ? 1 : (body.isPublic === false ? 0 : existing.is_public));
+
   await c.env.DB.prepare(
-    'UPDATE resumes SET title = ?, template_id = ?, content = ?, theme_config = ?, updated_at = ? WHERE id = ?'
+    'UPDATE resumes SET title = ?, template_id = ?, content = ?, theme_config = ?, is_public = ?, updated_at = ? WHERE id = ?'
   ).bind(
     body.title || '未命名简历',
     body.templateId || 'classic',
     JSON.stringify(body.content || {}),
     JSON.stringify(body.themeConfig || {}),
+    isPublicVal,
     now,
     resumeId
   ).run();
@@ -245,11 +324,33 @@ app.put('/resumes/:id', async (c) => {
   return c.json({
     code: 0,
     message: '保存成功',
-    data: { id: resumeId, updatedAt: now }
+    data: { id: resumeId, updatedAt: now, isPublic: isPublicVal }
   });
 });
 
-// 2.5 删除简历
+// 2.5 切换简历公开分享开关
+app.post('/resumes/:id/share', async (c) => {
+  const userId = await getAuthUserId(c);
+  if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
+
+  const resumeId = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const isPublic = body.isPublic ? 1 : 0;
+
+  const existing: any = await c.env.DB.prepare('SELECT user_id FROM resumes WHERE id = ?').bind(resumeId).first();
+  if (!existing) return c.json({ code: 40401, message: '简历不存在', data: null }, 404);
+  if (existing.user_id !== userId) return c.json({ code: 40301, message: '无权修改该简历', data: null }, 403);
+
+  await c.env.DB.prepare('UPDATE resumes SET is_public = ? WHERE id = ?').bind(isPublic, resumeId).run();
+
+  return c.json({
+    code: 0,
+    message: isPublic === 1 ? '已开启公开分享' : '已关闭公开分享',
+    data: { id: resumeId, isPublic }
+  });
+});
+
+// 2.6 删除简历 (显式级联清理关联历史与访问记录)
 app.delete('/resumes/:id', async (c) => {
   const userId = await getAuthUserId(c);
   if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
@@ -259,6 +360,9 @@ app.delete('/resumes/:id', async (c) => {
   if (!existing) return c.json({ code: 40401, message: '简历不存在', data: null }, 404);
   if (existing.user_id !== userId) return c.json({ code: 40301, message: '无权删除该简历', data: null }, 403);
 
+  // 显式清理关联表，确保 D1 无外键级联模式下无孤儿行残留
+  await c.env.DB.prepare('DELETE FROM resume_history WHERE resume_id = ?').bind(resumeId).run().catch(() => {});
+  await c.env.DB.prepare('DELETE FROM resume_visits WHERE resume_id = ?').bind(resumeId).run().catch(() => {});
   await c.env.DB.prepare('DELETE FROM resumes WHERE id = ?').bind(resumeId).run();
   return c.json({ code: 0, message: '删除成功', data: { id: resumeId } });
 });
@@ -343,6 +447,7 @@ app.post('/resumes/:id/restore/:historyId', async (c) => {
 // ======================= 3. 对象存储上传 (Cloudflare R2) =======================
 
 // 3.1 上传头像到 R2
+// 3.1 上传头像到 R2 (严格白名单限制与路径隔离)
 app.post('/upload/avatar', async (c) => {
   const userId = await getAuthUserId(c);
   if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
@@ -354,21 +459,38 @@ app.post('/upload/avatar', async (c) => {
     return c.json({ code: 40003, message: '请上传有效图片文件', data: null }, 400);
   }
 
+  // 大小限制 2MB
+  if (file.size > 2 * 1024 * 1024) {
+    return c.json({ code: 40004, message: '头像文件大小不得超过 2MB', data: null }, 400);
+  }
+
+  // MIME 白名单严格校验
+  const ALLOWED_MIME: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp'
+  };
+  const ext = ALLOWED_MIME[file.type.toLowerCase()];
+  if (!ext) {
+    return c.json({ code: 40005, message: '仅支持 JPG、PNG 或 WebP 格式图片', data: null }, 400);
+  }
+
   if (!c.env.BUCKET) {
     return c.json({ code: 50002, message: 'R2 存储未开通，请直接使用本地图片预览', data: null }, 500);
   }
 
-  const key = `open-resume/avatars/${userId}_${Date.now()}.webp`;
+  // 严格限定目录前缀在 open-resume/avatars/{userId}/ 命名空间下
+  const randomSuffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+  const key = `open-resume/avatars/${userId}/${Date.now()}_${randomSuffix}.${ext}`;
   const arrayBuffer = await file.arrayBuffer();
 
-  // 写入 R2 存储桶
+  // 写入 R2 存储桶，严格设定合法 MIME
   await c.env.BUCKET.put(key, arrayBuffer, {
     httpMetadata: {
-      contentType: file.type || 'image/webp'
+      contentType: file.type.toLowerCase()
     }
   });
 
-  // 返回图片访问链接 (如果配置了绑定域名或 r2.dev)
   const avatarUrl = `/api/file/${key}`;
 
   return c.json({
@@ -378,25 +500,40 @@ app.post('/upload/avatar', async (c) => {
   });
 });
 
-// 3.2 读取 R2 存储文件代理
+// 3.2 读取 R2 存储文件代理 (防穿透与防 XSS 沙箱隔离)
 app.get('/file/*', async (c) => {
   if (!c.env.BUCKET) return c.text('R2 Not Configured', 500);
   const key = c.req.path.replace('/api/file/', '');
-  const object = await c.env.BUCKET.get(key);
 
+  // 权限越界防御：严禁跨目录读取 common-bucket 内的其他对象
+  if (!key.startsWith('open-resume/avatars/')) {
+    return c.text('Forbidden: Access denied outside avatars scope', 403);
+  }
+
+  // 扩展名安全检查
+  let safeMime = '';
+  if (key.endsWith('.jpg') || key.endsWith('.jpeg')) safeMime = 'image/jpeg';
+  else if (key.endsWith('.png')) safeMime = 'image/png';
+  else if (key.endsWith('.webp')) safeMime = 'image/webp';
+  else return c.text('Unsupported file type', 400);
+
+  const object = await c.env.BUCKET.get(key);
   if (!object) return c.text('File Not Found', 404);
 
   const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  headers.set('etag', object.httpEtag);
-  headers.set('Cache-Control', 'public, max-age=31536000');
+  headers.set('Content-Type', safeMime);
+  headers.set('X-Content-Type-Options', 'nosniff');
+  // 注入安全沙箱策略，彻底防御 HTML 伪装与恶意脚本执行
+  headers.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+  headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  if (object.httpEtag) headers.set('etag', object.httpEtag);
 
   return new Response(object.body, { headers });
 });
 
 // ======================= 4. 只读公开分享与 HR 访客追踪 =======================
 
-// 4.1 获取公开只读简历数据 (HR 浏览)
+// 4.1 获取公开只读简历数据 (严格校验 is_public 状态)
 app.get('/share/:id', async (c) => {
   const resumeId = c.req.param('id');
   const resume: any = await c.env.DB.prepare(
@@ -404,6 +541,11 @@ app.get('/share/:id', async (c) => {
   ).bind(resumeId).first();
 
   if (!resume) return c.json({ code: 40401, message: '简历不存在', data: null }, 404);
+
+  // 未开启公开分享时禁止越权浏览
+  if (resume.is_public !== 1) {
+    return c.json({ code: 40301, message: '该简历暂未开启公开分享，请联系所有者开启', data: null }, 403);
+  }
 
   return c.json({
     code: 0,
@@ -420,13 +562,22 @@ app.get('/share/:id', async (c) => {
   });
 });
 
-// 4.2 上报访客阅读足迹与行为心跳 (免登录)
+// 4.2 上报访客阅读足迹与行为心跳 (免登录，但必须为已公开简历)
 app.post('/share/:id/visit', async (c) => {
   const resumeId = c.req.param('id');
+  // 必须验证该简历是否存在且为公开状态
+  const target: any = await c.env.DB.prepare('SELECT is_public FROM resumes WHERE id = ?').bind(resumeId).first();
+  if (!target || target.is_public !== 1) {
+    return c.json({ code: 40301, message: '简历不存在或未公开分享', data: null }, 403);
+  }
+
   const body = await c.req.json().catch(() => ({}));
-  const duration = Number(body.duration || 0);
+  let duration = Number(body.duration || 0);
+  if (isNaN(duration) || duration < 0) duration = 0;
+  if (duration > 3600) duration = 3600; // 限制单次合理最大时长防刷
+
   const isDownloaded = body.isDownloaded ? 1 : 0;
-  const userAgent = c.req.header('User-Agent') || 'Unknown';
+  const userAgent = (c.req.header('User-Agent') || 'Unknown').slice(0, 255);
   const visitId = `v_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 
   await c.env.DB.prepare(
@@ -438,12 +589,24 @@ app.post('/share/:id/visit', async (c) => {
 
 // ======================= 5. 云端无头渲染导出模块 (PDF Export) =======================
 
-// 5.1 云端极速生成高清矢量 PDF
+// 5.1 云端极速生成高清矢量 PDF (需登录并限制提交体积)
 app.post('/export-pdf', async (c) => {
+  const userId = await getAuthUserId(c);
+  if (!userId) {
+    return c.json({ code: 40101, message: '请先登录后使用云端高清 PDF 渲染导出服务', data: null }, 401);
+  }
+
   const { html, title } = await c.req.json().catch(() => ({}));
-  if (!html) {
+  if (!html || typeof html !== 'string') {
     return c.json({ code: 40001, message: 'HTML 内容不能为空', data: null }, 400);
   }
+
+  if (html.length > 2 * 1024 * 1024) {
+    return c.json({ code: 40002, message: 'HTML 模板体积超出限制 (最大 2MB)', data: null }, 400);
+  }
+
+  // 安全过滤恶意的 <base> 标签
+  const sanitizedHtml = html.replace(/<base[^>]*>/gi, '');
 
   // 检查是否具备 Cloudflare Browser Run 绑定
   if (!c.env.MYBROWSER) {
@@ -463,8 +626,8 @@ app.post('/export-pdf', async (c) => {
     // 设定 210mm A4 视口与屏幕 DPR
     await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 2 });
 
-    // 注入页面 HTML
-    await page.setContent(html, {
+    // 注入页面经过安全过滤的 HTML
+    await page.setContent(sanitizedHtml, {
       waitUntil: 'load'
     });
 

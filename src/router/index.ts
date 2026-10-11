@@ -24,7 +24,8 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/dashboard',
     name: 'Dashboard',
-    component: DashboardView
+    component: DashboardView,
+    meta: { requiresAuth: true }
   },
   {
     path: '/editor/:id',
@@ -45,6 +46,16 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+});
+
+// 全局路由导航守卫：未登录拦截受保护路由
+router.beforeEach((to, _, next) => {
+  const token = localStorage.getItem('open_resume_token');
+  if (to.meta.requiresAuth && !token) {
+    next({ name: 'Login', query: { redirect: to.fullPath } });
+  } else {
+    next();
+  }
 });
 
 export default router;

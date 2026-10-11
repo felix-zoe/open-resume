@@ -8,7 +8,9 @@ const props = defineProps<{
   theme: ThemeConfig;
 }>();
 
-const { profile, modules } = props.content;
+const profile = computed(() => props.content.profile);
+const modules = computed(() => props.content.modules);
+const modulesOrder = computed(() => props.content.modulesOrder || ['work', 'projects', 'skills', 'education', 'custom']);
 
 const containerStyle = computed(() => ({
   fontSize: `${props.theme.fontSize}px`,
@@ -16,15 +18,27 @@ const containerStyle = computed(() => ({
   minHeight: '297mm'
 }));
 
+const sidebarStyle = computed(() => ({
+  padding: `${props.theme.pagePadding}mm`
+}));
+
+const mainStyle = computed(() => ({
+  padding: `${props.theme.pagePadding}mm`
+}));
+
 const sectionMarginStyle = computed(() => ({
   marginBottom: `${props.theme.sectionSpacing}px`
+}));
+
+const paragraphMarginStyle = computed(() => ({
+  marginBottom: `${props.theme.paragraphSpacing}px`
 }));
 </script>
 
 <template>
   <div class="modern-template w-full bg-white flex min-h-[297mm] text-gray-800" :class="theme.fontFamily" :style="containerStyle">
     <!-- 左侧侧边栏 (32% 宽度，浅色底色或主题色轻浅过渡) -->
-    <div class="resume-sidebar w-[32%] bg-slate-50 border-r border-slate-200 p-6 flex flex-col gap-5 flex-shrink-0">
+    <div class="resume-sidebar w-[32%] bg-slate-50 border-r border-slate-200 flex flex-col gap-5 flex-shrink-0" :style="sidebarStyle">
       <!-- 头像 -->
       <div v-if="profile.showAvatar && profile.avatar" class="flex justify-center">
         <img :src="profile.avatar" alt="Avatar" class="w-24 h-24 rounded-full object-cover shadow-sm border-2 border-white" />
@@ -101,7 +115,7 @@ const sectionMarginStyle = computed(() => ({
     </div>
 
     <!-- 右侧主体内容 (68% 宽度) -->
-    <div class="resume-main w-[68%] p-8 flex-1">
+    <div class="resume-main w-[68%] flex-1" :style="mainStyle">
       <!-- 个人评价/总结 -->
       <section v-if="profile.summary" class="mb-5 bg-slate-50/70 p-3 rounded border border-slate-100">
         <p class="text-xs text-slate-600 leading-relaxed">
@@ -109,59 +123,62 @@ const sectionMarginStyle = computed(() => ({
         </p>
       </section>
 
-      <!-- 工作经历 -->
-      <section v-if="modules.work.visible && modules.work.items.length" :style="sectionMarginStyle">
-        <h2 class="text-sm font-bold uppercase tracking-wider text-slate-900 pb-1 mb-3 border-b-2 flex items-center gap-2"
-            :style="{ borderColor: theme.themeColor }">
-          <span :style="{ color: theme.themeColor }">▍</span>
-          <span>{{ modules.work.title }}</span>
-        </h2>
-        <div class="space-y-4">
-          <div v-for="item in modules.work.items" :key="item.id" class="resume-section-item">
-            <div class="flex justify-between items-baseline font-semibold text-slate-900 text-xs">
-              <span>{{ item.company }} <span class="font-normal text-slate-500">· {{ item.position }}</span></span>
-              <span class="text-slate-400 text-[11px]">{{ item.startDate }} - {{ item.endDate }}</span>
+      <!-- 依据 modulesOrder 动态排序渲染工作、项目与自定义模块 -->
+      <template v-for="modKey in modulesOrder" :key="modKey">
+        <!-- 工作经历 -->
+        <section v-if="modKey === 'work' && modules.work.visible && modules.work.items.length" :style="sectionMarginStyle">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-slate-900 pb-1 mb-3 border-b-2 flex items-center gap-2"
+              :style="{ borderColor: theme.themeColor }">
+            <span :style="{ color: theme.themeColor }">▍</span>
+            <span>{{ modules.work.title }}</span>
+          </h2>
+          <div class="space-y-4">
+            <div v-for="item in modules.work.items" :key="item.id" class="resume-section-item">
+              <div class="flex justify-between items-baseline font-semibold text-slate-900 text-xs">
+                <span>{{ item.company }} <span class="font-normal text-slate-500">· {{ item.position }}</span></span>
+                <span class="text-slate-400 text-[11px]">{{ item.startDate }} - {{ item.endDate }}</span>
+              </div>
+              <p class="text-xs text-slate-600 whitespace-pre-line leading-relaxed mt-1" :style="paragraphMarginStyle">
+                {{ item.description }}
+              </p>
             </div>
-            <p class="text-xs text-slate-600 whitespace-pre-line leading-relaxed mt-1">
-              {{ item.description }}
-            </p>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- 项目经历 -->
-      <section v-if="modules.projects.visible && modules.projects.items.length" :style="sectionMarginStyle">
-        <h2 class="text-sm font-bold uppercase tracking-wider text-slate-900 pb-1 mb-3 border-b-2 flex items-center gap-2"
-            :style="{ borderColor: theme.themeColor }">
-          <span :style="{ color: theme.themeColor }">▍</span>
-          <span>{{ modules.projects.title }}</span>
-        </h2>
-        <div class="space-y-4">
-          <div v-for="item in modules.projects.items" :key="item.id" class="resume-section-item">
-            <div class="flex justify-between items-baseline font-semibold text-slate-900 text-xs">
-              <span>{{ item.name }} <span v-if="item.role" class="font-normal text-slate-500">({{ item.role }})</span></span>
-              <span class="text-slate-400 text-[11px]">{{ item.startDate }} - {{ item.endDate }}</span>
+        <!-- 项目经历 -->
+        <section v-if="modKey === 'projects' && modules.projects.visible && modules.projects.items.length" :style="sectionMarginStyle">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-slate-900 pb-1 mb-3 border-b-2 flex items-center gap-2"
+              :style="{ borderColor: theme.themeColor }">
+            <span :style="{ color: theme.themeColor }">▍</span>
+            <span>{{ modules.projects.title }}</span>
+          </h2>
+          <div class="space-y-4">
+            <div v-for="item in modules.projects.items" :key="item.id" class="resume-section-item">
+              <div class="flex justify-between items-baseline font-semibold text-slate-900 text-xs">
+                <span>{{ item.name }} <span v-if="item.role" class="font-normal text-slate-500">({{ item.role }})</span></span>
+                <span class="text-slate-400 text-[11px]">{{ item.startDate }} - {{ item.endDate }}</span>
+              </div>
+              <p class="text-xs text-slate-600 whitespace-pre-line leading-relaxed mt-1" :style="paragraphMarginStyle">
+                {{ item.description }}
+              </p>
             </div>
-            <p class="text-xs text-slate-600 whitespace-pre-line leading-relaxed mt-1">
-              {{ item.description }}
-            </p>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- 自定义模块 -->
-      <section v-if="modules.custom.visible && modules.custom.items.length" :style="sectionMarginStyle">
-        <h2 class="text-sm font-bold uppercase tracking-wider text-slate-900 pb-1 mb-3 border-b-2 flex items-center gap-2"
-            :style="{ borderColor: theme.themeColor }">
-          <span :style="{ color: theme.themeColor }">▍</span>
-          <span>{{ modules.custom.title }}</span>
-        </h2>
-        <ul class="list-disc list-inside text-xs text-slate-600 space-y-1">
-          <li v-for="(item, idx) in modules.custom.items" :key="idx" class="resume-section-item">
-            {{ item }}
-          </li>
-        </ul>
-      </section>
+        <!-- 自定义模块 -->
+        <section v-if="modKey === 'custom' && modules.custom.visible && modules.custom.items.length" :style="sectionMarginStyle">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-slate-900 pb-1 mb-3 border-b-2 flex items-center gap-2"
+              :style="{ borderColor: theme.themeColor }">
+            <span :style="{ color: theme.themeColor }">▍</span>
+            <span>{{ modules.custom.title }}</span>
+          </h2>
+          <ul class="list-disc list-inside text-xs text-slate-600 space-y-1">
+            <li v-for="(item, idx) in modules.custom.items" :key="idx" class="resume-section-item" :style="paragraphMarginStyle">
+              {{ item }}
+            </li>
+          </ul>
+        </section>
+      </template>
     </div>
   </div>
 </template>

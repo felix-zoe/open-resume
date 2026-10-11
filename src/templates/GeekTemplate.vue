@@ -8,7 +8,9 @@ const props = defineProps<{
   theme: ThemeConfig;
 }>();
 
-const { profile, modules, modulesOrder } = props.content;
+const profile = computed(() => props.content.profile);
+const modules = computed(() => props.content.modules);
+const modulesOrder = computed(() => props.content.modulesOrder || ['skills', 'work', 'projects', 'education', 'custom']);
 
 const containerStyle = computed(() => ({
   fontSize: `${props.theme.fontSize}px`,
@@ -19,10 +21,14 @@ const containerStyle = computed(() => ({
 const sectionMarginStyle = computed(() => ({
   marginBottom: `${props.theme.sectionSpacing}px`
 }));
+
+const paragraphMarginStyle = computed(() => ({
+  marginBottom: `${props.theme.paragraphSpacing}px`
+}));
 </script>
 
 <template>
-  <div class="geek-template w-full bg-white font-mono text-gray-800" :style="containerStyle">
+  <div class="geek-template w-full bg-white text-gray-800" :class="theme.fontFamily || 'font-mono'" :style="containerStyle">
     <!-- 极客风头部 -->
     <div class="resume-header border-l-4 pl-4 py-1 mb-5" :style="{ borderColor: theme.themeColor }">
       <div class="flex items-center justify-between">
@@ -88,7 +94,7 @@ const sectionMarginStyle = computed(() => ({
                 <span class="font-bold text-gray-900 text-xs">{{ item.company }} <span class="font-normal text-gray-500">/ {{ item.position }}</span></span>
                 <span class="text-xs font-mono text-gray-400">{{ item.startDate }} ~ {{ item.endDate }}</span>
               </div>
-              <p class="text-xs text-gray-600 whitespace-pre-line leading-relaxed mt-1">
+              <p class="text-xs text-gray-600 whitespace-pre-line leading-relaxed mt-1" :style="paragraphMarginStyle">
                 {{ item.description }}
               </p>
             </div>
@@ -110,7 +116,7 @@ const sectionMarginStyle = computed(() => ({
                 </span>
                 <span class="text-xs font-mono text-gray-400">{{ item.startDate }} ~ {{ item.endDate }}</span>
               </div>
-              <p class="text-xs text-gray-600 whitespace-pre-line leading-relaxed mt-1">
+              <p class="text-xs text-gray-600 whitespace-pre-line leading-relaxed mt-1" :style="paragraphMarginStyle">
                 {{ item.description }}
               </p>
             </div>

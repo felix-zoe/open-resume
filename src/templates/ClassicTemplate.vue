@@ -8,7 +8,9 @@ const props = defineProps<{
   theme: ThemeConfig;
 }>();
 
-const { profile, modules, modulesOrder } = props.content;
+const profile = computed(() => props.content.profile);
+const modules = computed(() => props.content.modules);
+const modulesOrder = computed(() => props.content.modulesOrder || ['work', 'projects', 'skills', 'education', 'custom']);
 
 // 动态样式计算
 const containerStyle = computed(() => ({

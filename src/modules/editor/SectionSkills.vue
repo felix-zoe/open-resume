@@ -1,16 +1,17 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useResumeStore } from '../../stores/resume';
 import { Plus, Trash2 } from 'lucide-vue-next';
 
 const resumeStore = useResumeStore();
-const skillsModule = resumeStore.content.modules.skills;
+const skillsModule = computed(() => resumeStore.content.modules.skills);
 
 const addSkill = () => {
-  skillsModule.items.push('');
+  skillsModule.value.items.push('');
 };
 
 const removeSkill = (index: number) => {
-  skillsModule.items.splice(index, 1);
+  skillsModule.value.items.splice(index, 1);
 };
 </script>
 

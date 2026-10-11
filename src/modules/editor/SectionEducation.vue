@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useResumeStore } from '../../stores/resume';
 import { EducationItem } from '../../types/resume';
 import { Plus, Trash2 } from 'lucide-vue-next';
 
 const resumeStore = useResumeStore();
-const eduModule = resumeStore.content.modules.education;
+const eduModule = computed(() => resumeStore.content.modules.education);
 
 const addEduItem = () => {
   const newItem: EducationItem = {
@@ -16,11 +17,11 @@ const addEduItem = () => {
     endDate: '',
     description: ''
   };
-  eduModule.items.push(newItem);
+  eduModule.value.items.push(newItem);
 };
 
 const removeEduItem = (index: number) => {
-  eduModule.items.splice(index, 1);
+  eduModule.value.items.splice(index, 1);
 };
 </script>
 

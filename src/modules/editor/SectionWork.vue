@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useResumeStore } from '../../stores/resume';
 import { WorkItem } from '../../types/resume';
 import { Plus, Trash2, HelpCircle, ArrowUp, ArrowDown } from 'lucide-vue-next';
 
 const resumeStore = useResumeStore();
-const workModule = resumeStore.content.modules.work;
+const workModule = computed(() => resumeStore.content.modules.work);
 
 const addWorkItem = () => {
   const newItem: WorkItem = {
@@ -16,19 +17,19 @@ const addWorkItem = () => {
     endDate: '至今',
     description: '• 负责...\n• 达成...'
   };
-  workModule.items.push(newItem);
+  workModule.value.items.push(newItem);
 };
 
 const removeWorkItem = (index: number) => {
-  workModule.items.splice(index, 1);
+  workModule.value.items.splice(index, 1);
 };
 
 const moveWorkItem = (index: number, direction: 'up' | 'down') => {
   const target = direction === 'up' ? index - 1 : index + 1;
-  if (target >= 0 && target < workModule.items.length) {
-    const temp = workModule.items[index];
-    workModule.items[index] = workModule.items[target];
-    workModule.items[target] = temp;
+  if (target >= 0 && target < workModule.value.items.length) {
+    const temp = workModule.value.items[index];
+    workModule.value.items[index] = workModule.value.items[target];
+    workModule.value.items[target] = temp;
   }
 };
 

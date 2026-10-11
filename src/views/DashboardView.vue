@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import Navbar from '../components/Navbar.vue';
 import AuthModal from '../components/AuthModal.vue';
 import { useAuthStore } from '../stores/auth';
+import { DEFAULT_RESUME_CONTENT, DEFAULT_THEME_CONFIG } from '../utils/presets';
 import {
   Plus,
   Trash2,
@@ -16,13 +17,16 @@ import {
   Download,
   X,
   ExternalLink,
-  Activity
+  Activity,
+  Globe,
+  Lock
 } from 'lucide-vue-next';
 
 interface ResumeSummary {
   id: string;
   title: string;
   templateId: string;
+  isPublic?: number;
   updatedAt: string | number;
   stats?: {
     totalViews: number;
@@ -40,8 +44,9 @@ const resumes = ref<ResumeSummary[]>([
     id: 'demo',
     title: '资深前端研发工程师-张小凡',
     templateId: 'classic',
+    isPublic: 1,
     updatedAt: '本地示范',
-    stats: { totalViews: 6, avgDuration: 42, totalDownloads: 2 }
+    stats: { totalViews: 0, avgDuration: 0, totalDownloads: 0 }
   }
 ]);
 
@@ -58,14 +63,10 @@ const openAnalytics = async (item: ResumeSummary) => {
 
   if (item.id === 'demo' || !authStore.isLoggedIn) {
     activeAnalyticsData.value = {
-      totalViews: item.stats?.totalViews || 6,
-      avgDuration: item.stats?.avgDuration || 42,
-      totalDownloads: item.stats?.totalDownloads || 2,
-      recentVisits: [
-        { id: '1', duration: 58, isDownloaded: 1, createdAt: Math.floor(Date.now() / 1000) - 3600 },
-        { id: '2', duration: 35, isDownloaded: 0, createdAt: Math.floor(Date.now() / 1000) - 7200 },
-        { id: '3', duration: 42, isDownloaded: 1, createdAt: Math.floor(Date.now() / 1000) - 86400 }
-      ]
+      totalViews: item.stats?.totalViews || 0,
+      avgDuration: item.stats?.avgDuration || 0,
+      totalDownloads: item.stats?.totalDownloads || 0,
+      recentVisits: []
     };
     loadingAnalytics.value = false;
     return;
@@ -95,14 +96,56 @@ const formatTime = (time: string | number) => {
   return time;
 };
 
-// 复制分享链接
-const copyShareLink = (id: string) => {
-  const url = `${window.location.origin}/share/${id}`;
-  navigator.clipboard.writeText(url).then(() => {
-    alert(`在线分享链接已复制：\n${url}`);
-  }).catch(() => {
-    alert(`链接：${url}`);
-  });
+// 切换公开分享开关
+const toggleShareStatus = async (item: ResumeSummary) => {
+  if (!authStore.isLoggedIn) {
+    isAuthModalOpen.value = true;
+    return;
+  }
+  const nextPublic = item.isPublic === 1 ? 0 : 1;
+  try {
+    const res = await fetch(`/api/resumes/${item.id}/share`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authStore.token}`
+      },
+      body: JSON.stringify({ isPublic: nextPublic })
+    });
+    const json: any = await res.json();
+    if (json.code === 0) {
+      item.isPublic = nextPublic;
+    } else {
+      alert(json.message || '更新分享设置失败');
+    }
+  } catch (err) {
+    console.error('切换分享状态失败:', err);
+  }
+};
+
+// 复制分享链接 (若未公开，主动提示是否一键开启)
+const copyShareLink = async (item: ResumeSummary) => {
+  if (item.id === 'demo') {
+    alert('示例简历不支持生成云端分享链接');
+    return;
+  }
+
+  if (item.isPublic !== 1) {
+    const shouldEnable = confirm('该简历当前处于私有状态，HR 无法打开。\n是否立即开启公开分享并复制链接？');
+    if (shouldEnable) {
+      await toggleShareStatus(item);
+    } else {
+      return;
+    }
+  }
+
+  const url = `${window.location.origin}/share/${item.id}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    alert(`在线只读分享链接已复制：\n${url}`);
+  } catch {
+    alert(`分享链接：${url}`);
+  }
 };
 
 // 拉取云端数据
@@ -140,10 +183,10 @@ onMounted(() => {
   fetchResumes();
 });
 
+// 新建简历 (提交完整骨架结构，防止云端出现空对象)
 const createNewResume = async () => {
   if (!authStore.isLoggedIn) {
-    const newId = `resume_${Date.now()}`;
-    router.push(`/editor/${newId}`);
+    router.push('/editor/demo');
     return;
   }
 
@@ -156,45 +199,91 @@ const createNewResume = async () => {
       },
       body: JSON.stringify({
         title: '未命名求职简历',
-        templateId: 'classic'
+        templateId: 'classic',
+        content: DEFAULT_RESUME_CONTENT,
+        themeConfig: DEFAULT_THEME_CONFIG
       })
     });
     const data: any = await res.json();
     if (data.code === 0 && data.data?.id) {
       router.push(`/editor/${data.data.id}`);
+    } else {
+      alert(data.message || '新建简历失败');
     }
   } catch (err) {
     console.error(err);
-    const newId = `resume_${Date.now()}`;
-    router.push(`/editor/${newId}`);
+    alert('网络异常，创建简历失败');
   }
 };
 
+// 真实复刻副本
 const duplicateResume = async (item: ResumeSummary) => {
-  const copyId = `resume_${Date.now()}`;
-  resumes.value.unshift({
-    id: copyId,
-    title: `${item.title}_副本`,
-    templateId: item.templateId,
-    updatedAt: Math.floor(Date.now() / 1000),
-    stats: { totalViews: 0, avgDuration: 0, totalDownloads: 0 }
-  });
+  if (!authStore.isLoggedIn) {
+    isAuthModalOpen.value = true;
+    return;
+  }
+
+  try {
+    // 1. 获取原简历完整数据
+    const detailRes = await fetch(`/api/resumes/${item.id}`, {
+      headers: { Authorization: `Bearer ${authStore.token}` }
+    });
+    const detailJson: any = await detailRes.json();
+    const originalContent = detailJson.data?.content || DEFAULT_RESUME_CONTENT;
+    const originalTheme = detailJson.data?.themeConfig || DEFAULT_THEME_CONFIG;
+
+    // 2. 调用后端创建真实副本
+    const res = await fetch('/api/resumes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authStore.token}`
+      },
+      body: JSON.stringify({
+        title: `${item.title}_副本`,
+        templateId: item.templateId,
+        content: originalContent,
+        themeConfig: originalTheme
+      })
+    });
+    const data: any = await res.json();
+    if (data.code === 0 && data.data?.id) {
+      await fetchResumes();
+    } else {
+      alert(data.message || '复制失败');
+    }
+  } catch (err) {
+    console.error('复制简历失败:', err);
+    alert('网络异常，复制失败');
+  }
 };
 
+// 真实删除 (以接口成功为准)
 const deleteResume = async (idx: number, id: string) => {
   if (!confirm('确认删除该简历吗？此操作不可撤销。')) return;
 
-  if (authStore.isLoggedIn && id !== 'demo') {
+  if (id === 'demo') {
+    resumes.value.splice(idx, 1);
+    return;
+  }
+
+  if (authStore.isLoggedIn) {
     try {
-      await fetch(`/api/resumes/${id}`, {
+      const res = await fetch(`/api/resumes/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${authStore.token}` }
       });
+      const json: any = await res.json();
+      if (res.ok && json.code === 0) {
+        resumes.value.splice(idx, 1);
+      } else {
+        alert(json.message || '删除失败');
+      }
     } catch (err) {
       console.error(err);
+      alert('网络连接错误，删除失败');
     }
   }
-  resumes.value.splice(idx, 1);
 };
 </script>
 
@@ -240,12 +329,24 @@ const deleteResume = async (idx: number, id: string) => {
         >
           <div>
             <div class="flex items-center justify-between mb-2.5">
-              <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 uppercase font-mono">
-                {{ item.templateId }} 模板
-              </span>
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 uppercase font-mono">
+                  {{ item.templateId }} 模板
+                </span>
+                <button
+                  v-if="item.id !== 'demo'"
+                  @click="toggleShareStatus(item)"
+                  class="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition cursor-pointer"
+                  :class="item.isPublic === 1 ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'"
+                  :title="item.isPublic === 1 ? '当前为公开分享（点击切换为私有）' : '当前为私有（点击开启公开分享）'"
+                >
+                  <component :is="item.isPublic === 1 ? Globe : Lock" class="w-3 h-3" />
+                  <span>{{ item.isPublic === 1 ? '公开' : '私有' }}</span>
+                </button>
+              </div>
               <div class="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition">
                 <button
-                  @click="copyShareLink(item.id)"
+                  @click="copyShareLink(item)"
                   class="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-slate-50"
                   title="复制在线只读分享链接"
                 >

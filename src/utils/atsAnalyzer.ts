@@ -109,7 +109,8 @@ export function analyzeResumeAgainstJd(resumeContent: ResumeContent, jdText: str
   }
 
   // 2. 量化指标检测 (检测是否包含数字 + 单位，如: 30%, 200万, 3倍, 10+等)
-  const metricRegex = /\d+[%％倍万千人次个项起元条kK+＋]/g;
+  // 注意：此处不带 g 标志，避免在循环中反复调用 .test() 时 lastIndex 状态推进导致隔行判定失效
+  const metricRegex = /\d+[%％倍万千人次个项起元条kK+＋]/;
   const workItems = resumeContent.modules.work?.items || [];
   const projectItems = resumeContent.modules.projects?.items || [];
 
@@ -117,7 +118,7 @@ export function analyzeResumeAgainstJd(resumeContent: ResumeContent, jdText: str
   let pointsWithMetrics = 0;
 
   for (const item of [...workItems, ...projectItems]) {
-    const lines = item.description.split('\n').filter(l => l.trim().length > 0);
+    const lines = (item.description || '').split('\n').filter(l => l.trim().length > 0);
     for (const line of lines) {
       totalPoints++;
       if (metricRegex.test(line)) {

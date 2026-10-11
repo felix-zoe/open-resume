@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useResumeStore } from '../../stores/resume';
 import { ProjectItem } from '../../types/resume';
 import { Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-vue-next';
 
 const resumeStore = useResumeStore();
-const projectModule = resumeStore.content.modules.projects;
+const projectModule = computed(() => resumeStore.content.modules.projects);
 
 const addProjectItem = () => {
   const newItem: ProjectItem = {
@@ -16,19 +17,19 @@ const addProjectItem = () => {
     link: '',
     description: '• 项目背景：...\n• 核心职责与贡献：...'
   };
-  projectModule.items.push(newItem);
+  projectModule.value.items.push(newItem);
 };
 
 const removeProjectItem = (index: number) => {
-  projectModule.items.splice(index, 1);
+  projectModule.value.items.splice(index, 1);
 };
 
 const moveProjectItem = (index: number, direction: 'up' | 'down') => {
   const target = direction === 'up' ? index - 1 : index + 1;
-  if (target >= 0 && target < projectModule.items.length) {
-    const temp = projectModule.items[index];
-    projectModule.items[index] = projectModule.items[target];
-    projectModule.items[target] = temp;
+  if (target >= 0 && target < projectModule.value.items.length) {
+    const temp = projectModule.value.items[index];
+    projectModule.value.items[index] = projectModule.value.items[target];
+    projectModule.value.items[target] = temp;
   }
 };
 
