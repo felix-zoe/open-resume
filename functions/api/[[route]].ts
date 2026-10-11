@@ -260,7 +260,7 @@ app.post('/upload/avatar', async (c) => {
     return c.json({ code: 50002, message: 'R2 存储未开通，请直接使用本地图片预览', data: null }, 500);
   }
 
-  const key = `avatars/${userId}_${Date.now()}.webp`;
+  const key = `open-resume/avatars/${userId}_${Date.now()}.webp`;
   const arrayBuffer = await file.arrayBuffer();
 
   // 写入 R2 存储桶

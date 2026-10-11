@@ -1,26 +1,72 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { useResumeStore } from '../../stores/resume';
-import { User, Mail, Phone, MapPin, Globe, Github, Image as ImageIcon } from 'lucide-vue-next';
+import { useAuthStore } from '../../stores/auth';
+import { User, Mail, Phone, MapPin, Globe, Github, Image as ImageIcon, Loader2 } from 'lucide-vue-next';
 
 const resumeStore = useResumeStore();
+const authStore = useAuthStore();
 const profile = resumeStore.content.profile;
 
-// 简易本地图片选择并转 Base64 预览（MVP 快速体验，后续可接 R2 上传）
-const handleAvatarFile = (e: Event) => {
+const isUploading = ref(false);
+
+// 头像上传：若已登录则上传至 Cloudflare R2，未登录则本地 Base64 预览
+const handleAvatarFile = async (e: Event) => {
   const target = e.target as HTMLInputElement;
   const file = target.files?.[0];
-  if (file) {
-    if (file.size > 2 * 1024 * 1024) {
-      alert('图片大小请小于 2MB');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
-      profile.avatar = uploadEvent.target?.result as string;
-      profile.showAvatar = true;
-    };
-    reader.readAsDataURL(file);
+  if (!file) return;
+
+  if (file.size > 2 * 1024 * 1024) {
+    alert('图片大小请小于 2MB');
+    target.value = '';
+    return;
   }
+
+  // 1. 若已登录，上传至 Cloudflare R2
+  if (authStore.isLoggedIn && authStore.token) {
+    isUploading.value = true;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/upload/avatar', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${authStore.token}`
+        },
+        body: formData
+      });
+
+      const json = (await res.json()) as { code?: number; message?: string; data?: { url?: string } };
+      if (res.ok && json.code === 0 && json.data?.url) {
+        profile.avatar = json.data.url;
+        profile.showAvatar = true;
+      } else {
+        alert(json.message || '上传头像至云端失败，已保留本地预览');
+        fallbackToBase64(file);
+      }
+    } catch (err) {
+      console.error('R2 upload failed:', err);
+      alert('上传服务连接失败，已回退至本地预览');
+      fallbackToBase64(file);
+    } finally {
+      isUploading.value = false;
+      target.value = '';
+    }
+  } else {
+    // 2. 未登录单机体验，使用本地 Base64 预览
+    fallbackToBase64(file);
+    target.value = '';
+  }
+};
+
+const fallbackToBase64 = (file: File) => {
+  const reader = new FileReader();
+  reader.onload = (uploadEvent) => {
+    profile.avatar = uploadEvent.target?.result as string;
+    profile.showAvatar = true;
+  };
+  reader.readAsDataURL(file);
 };
 </script>
 
@@ -36,7 +82,18 @@ const handleAvatarFile = (e: Event) => {
             <ImageIcon class="w-5 h-5 mx-auto mb-1" />
             <span class="text-[10px]">点击上传</span>
           </div>
-          <input type="file" accept="image/*" @change="handleAvatarFile" class="absolute inset-0 opacity-0 cursor-pointer" />
+          <!-- 上传中遮罩 -->
+          <div v-if="isUploading" class="absolute inset-0 bg-black/50 flex flex-col items-center justify-center text-white z-10">
+            <Loader2 class="w-5 h-5 animate-spin mb-1 text-white" />
+            <span class="text-[10px]">上传中...</span>
+          </div>
+          <input
+            type="file"
+            accept="image/*"
+            :disabled="isUploading"
+            @change="handleAvatarFile"
+            class="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
+          />
         </div>
         <div class="mt-1 flex items-center gap-1">
           <input type="checkbox" id="showAvatar" v-model="profile.showAvatar" class="w-3.5 h-3.5 rounded text-blue-600" />
