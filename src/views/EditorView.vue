@@ -49,7 +49,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="h-screen flex flex-col bg-gray-50 overflow-hidden font-sans">
+  <div class="editor-view-root h-screen flex flex-col bg-gray-50 overflow-hidden font-sans">
     <!-- 顶部操作导航 -->
     <EditorHeader
       @toggleStyleDrawer="isStyleDrawerOpen = true"
@@ -58,7 +58,7 @@ onMounted(async () => {
     />
 
     <!-- 编辑器主体：左表单 + 右画板 -->
-    <main class="flex-1 flex overflow-hidden">
+    <main class="editor-main-area flex-1 flex overflow-hidden">
       <!-- 左侧表单输入区 -->
       <FormPanel />
 

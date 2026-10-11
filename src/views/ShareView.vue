@@ -146,7 +146,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 真实标准 A4 画布展示 -->
-    <main v-else class="py-8 flex justify-center w-full overflow-x-auto">
+    <main v-else class="share-main-area py-8 flex justify-center w-full overflow-x-auto">
       <div class="a4-page a4-print-target bg-white shadow-xl rounded-sm" style="width: 210mm; min-height: 297mm;">
         <component
           :is="currentTemplateComponent"

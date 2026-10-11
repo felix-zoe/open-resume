@@ -29,7 +29,7 @@ const paragraphMarginStyle = computed(() => ({
 <template>
   <div class="classic-template w-full bg-white text-gray-800" :class="theme.fontFamily" :style="containerStyle">
     <!-- 1. 顶部基础信息 (居中/左右排布) -->
-    <header class="flex items-center justify-between border-b pb-4 mb-5" :style="{ borderColor: theme.showBorder ? '#e5e7eb' : 'transparent' }">
+    <div class="resume-header flex items-center justify-between border-b pb-4 mb-5" :style="{ borderColor: theme.showBorder ? '#e5e7eb' : 'transparent' }">
       <div class="flex-1">
         <h1 class="text-2xl font-bold tracking-tight text-gray-900" :style="{ color: theme.themeColor }">
           {{ profile.name || '姓名' }}
@@ -72,7 +72,7 @@ const paragraphMarginStyle = computed(() => ({
       <div v-if="profile.showAvatar && profile.avatar" class="ml-4 flex-shrink-0">
         <img :src="profile.avatar" alt="Avatar" class="w-20 h-24 object-cover rounded border border-gray-200 shadow-sm" />
       </div>
-    </header>
+    </div>
 
     <!-- 2. 动态模块排版 (按用户自定义顺序渲染) -->
     <div class="resume-body">

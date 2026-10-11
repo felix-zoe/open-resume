@@ -24,7 +24,7 @@ const sectionMarginStyle = computed(() => ({
 <template>
   <div class="modern-template w-full bg-white flex min-h-[297mm] text-gray-800" :class="theme.fontFamily" :style="containerStyle">
     <!-- 左侧侧边栏 (32% 宽度，浅色底色或主题色轻浅过渡) -->
-    <aside class="w-[32%] bg-slate-50 border-r border-slate-200 p-6 flex flex-col gap-5 flex-shrink-0">
+    <div class="resume-sidebar w-[32%] bg-slate-50 border-r border-slate-200 p-6 flex flex-col gap-5 flex-shrink-0">
       <!-- 头像 -->
       <div v-if="profile.showAvatar && profile.avatar" class="flex justify-center">
         <img :src="profile.avatar" alt="Avatar" class="w-24 h-24 rounded-full object-cover shadow-sm border-2 border-white" />
@@ -98,10 +98,10 @@ const sectionMarginStyle = computed(() => ({
           </span>
         </div>
       </div>
-    </aside>
+    </div>
 
     <!-- 右侧主体内容 (68% 宽度) -->
-    <main class="w-[68%] p-8 flex-1">
+    <div class="resume-main w-[68%] p-8 flex-1">
       <!-- 个人评价/总结 -->
       <section v-if="profile.summary" class="mb-5 bg-slate-50/70 p-3 rounded border border-slate-100">
         <p class="text-xs text-slate-600 leading-relaxed">
@@ -162,6 +162,6 @@ const sectionMarginStyle = computed(() => ({
           </li>
         </ul>
       </section>
-    </main>
+    </div>
   </div>
 </template>

@@ -23,12 +23,8 @@
 
 /* 核心 A4 打印与导出样式适配 */
 @media print {
-  /* 隐藏所有界面交互操作与工具栏 */
+  /* 隐藏所有界面交互操作与工具栏 (仅基于类名选择器，严禁误杀简历模板中的语义标签) */
   .no-print,
-  header,
-  nav,
-  aside,
-  button,
   .editor-sidebar,
   .page-indicator-line,
   .zoom-controls {
@@ -47,19 +43,39 @@
     background: #ffffff !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    height: auto !important;
+    overflow: visible !important;
   }
 
-  #app {
+  * {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+  }
+
+  #app,
+  .app-root,
+  .editor-view-root,
+  .editor-main-area,
+  .preview-canvas-wrapper,
+  .canvas-zoom-container,
+  .share-main-area {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
     margin: 0 !important;
     padding: 0 !important;
+    background: transparent !important;
+    background-image: none !important;
+    transform: none !important;
+    display: block !important;
   }
 
-  /* 画布在打印时重置缩放和边框阴影 */
+  /* 画布在打印时重置缩放和边框阴影，精确匹配 A4 幅面 */
   .a4-print-target {
     transform: none !important;
     box-shadow: none !important;
     border: none !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     width: 210mm !important;
     min-height: 297mm !important;
   }

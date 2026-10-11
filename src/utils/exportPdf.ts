@@ -6,8 +6,8 @@
 export function triggerPrintPdf(resumeTitle: string = '我的简历') {
   const originalTitle = document.title;
   try {
-    // 动态将网页标题临时修改为简历文件名，浏览器另存为 PDF 时会自动采纳此名字
-    document.title = `${resumeTitle}.pdf`.replace(/[\\/:*?"<>|]/g, '_');
+    // 动态将网页标题临时修改为简历文件名，浏览器另存为 PDF 时会自动采纳并追加 .pdf 后缀
+    document.title = (resumeTitle || '我的简历').replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|]/g, '_');
     window.print();
   } finally {
     // 打印对话框关闭后还原标题

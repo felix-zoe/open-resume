@@ -24,7 +24,7 @@ const sectionMarginStyle = computed(() => ({
 <template>
   <div class="geek-template w-full bg-white font-mono text-gray-800" :style="containerStyle">
     <!-- 极客风头部 -->
-    <header class="border-l-4 pl-4 py-1 mb-5" :style="{ borderColor: theme.themeColor }">
+    <div class="resume-header border-l-4 pl-4 py-1 mb-5" :style="{ borderColor: theme.themeColor }">
       <div class="flex items-center justify-between">
         <div>
           <h1 class="text-2xl font-black tracking-tight text-gray-900 flex items-center gap-2">
@@ -57,7 +57,7 @@ const sectionMarginStyle = computed(() => ({
       <p v-if="profile.summary" class="text-xs text-gray-600 font-sans mt-2">
         // {{ profile.summary }}
       </p>
-    </header>
+    </div>
 
     <!-- 动态模块 -->
     <div class="geek-body font-sans">
