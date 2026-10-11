@@ -22,7 +22,7 @@ export async function exportResumePdf(resumeTitle: string = '我的简历'): Pro
   message: string;
 }> {
   const cleanTitle = (resumeTitle || '我的简历').replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|]/g, '_');
-  const targetElement = document.querySelector('.a4-print-target');
+  const targetElement = document.querySelector('.a4-print-target') as HTMLElement | null;
 
   if (!targetElement) {
     triggerPrintPdf(cleanTitle);
@@ -30,23 +30,67 @@ export async function exportResumePdf(resumeTitle: string = '我的简历'): Pro
   }
 
   try {
-    // 1. 抽取当前页面全部样式与 Tailwind 规范
-    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
-      .map(el => el.outerHTML)
+    // 1. 深度提取当前页面在内存中的所有已解析 CSS 样式规则 (包含 Tailwind 全量工具类与组件样式)
+    let inlinedCss = '';
+    try {
+      for (const sheet of Array.from(document.styleSheets)) {
+        try {
+          if (sheet.cssRules) {
+            for (const rule of Array.from(sheet.cssRules)) {
+              inlinedCss += rule.cssText + '\n';
+            }
+          }
+        } catch {
+          // 遇到可能的跨域外部字体或 CDN 样式时静默捕获安全异常
+        }
+      }
+    } catch (e) {
+      console.warn('提取 CSS 规则失败:', e);
+    }
+
+    // 2. 将所有外部样式表转换为带当前完整 Origin 的绝对 URL 作为备选加载
+    const linkedStyles = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+      .map(link => {
+        const href = link.getAttribute('href');
+        if (!href) return '';
+        try {
+          const absoluteHref = new URL(href, window.location.origin).href;
+          return `<link rel="stylesheet" href="${absoluteHref}">`;
+        } catch {
+          return link.outerHTML;
+        }
+      })
+      .filter(Boolean)
       .join('\n');
 
-    // 2. 组装 100% 真实纯净的独立 A4 渲染 HTML
+    // 3. 抽取现有 <style> 标签
+    const existingStyles = Array.from(document.querySelectorAll('style'))
+      .map(s => s.outerHTML)
+      .join('\n');
+
+    // 4. 克隆画布 DOM 节点，并彻底剥离交互指示线 (如 .page-indicator-line 等 .no-print 元素)
+    const clone = targetElement.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('.no-print').forEach(el => el.remove());
+
+    // 5. 组装 100% 真实纯净、完全自包含的独立 A4 渲染 HTML
     const fullHtml = `<!DOCTYPE html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <base href="${window.location.origin}/">
     <title>${cleanTitle}</title>
-    ${styles}
+    ${linkedStyles}
+    ${existingStyles}
+    <style id="inlined-extracted-styles">
+      ${inlinedCss}
+    </style>
     <style>
       @page {
         size: A4 portrait;
         margin: 0;
+      }
+      *, *::before, *::after {
+        box-sizing: border-box;
       }
       html, body {
         margin: 0 !important;
@@ -54,6 +98,7 @@ export async function exportResumePdf(resumeTitle: string = '我的简历'): Pro
         background: #ffffff !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
+        width: 210mm !important;
       }
       .a4-print-target {
         transform: none !important;
@@ -73,13 +118,11 @@ export async function exportResumePdf(resumeTitle: string = '我的简历'): Pro
     </style>
   </head>
   <body>
-    <div style="width: 210mm; margin: 0 auto;">
-      ${targetElement.outerHTML}
-    </div>
+    ${clone.outerHTML}
   </body>
 </html>`;
 
-    // 3. 请求云端无头 Chromium 渲染
+    // 6. 请求云端无头 Chromium 渲染
     const res = await fetch('/api/export-pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

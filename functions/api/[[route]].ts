@@ -468,6 +468,20 @@ app.post('/export-pdf', async (c) => {
       waitUntil: 'load'
     });
 
+    // 等待网页可能存在的图片（头像等）加载完成
+    await page.evaluate(async () => {
+      const images = Array.from(document.images);
+      await Promise.all(
+        images.map((img) => {
+          if (img.complete) return Promise.resolve();
+          return new Promise((resolve) => {
+            img.onload = resolve;
+            img.onerror = resolve;
+          });
+        })
+      );
+    });
+
     // 等待字体就绪
     await page.evaluateHandle('document.fonts.ready');
 
