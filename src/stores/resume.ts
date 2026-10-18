@@ -1,7 +1,9 @@
 import { defineStore } from 'pinia';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { ResumeContent, ThemeConfig } from '../types/resume';
 import { DEFAULT_RESUME_CONTENT, DEFAULT_THEME_CONFIG } from '../utils/presets';
+import { A4_HEIGHT_PX, RESUME_DOC_SELECTOR } from '../utils/a4';
+import { apiFetch } from '../utils/http';
 import { useAuthStore } from './auth';
 
 export const useResumeStore = defineStore('resume', () => {
@@ -15,12 +17,38 @@ export const useResumeStore = defineStore('resume', () => {
   const content = ref<ResumeContent>(JSON.parse(JSON.stringify(DEFAULT_RESUME_CONTENT)));
   const themeConfig = ref<ThemeConfig>(JSON.parse(JSON.stringify(DEFAULT_THEME_CONFIG)));
 
+  /**
+   * 本地草稿：尚未落到云端，不能分享、也不能发 PUT 到 `/api/resumes/:id`。
+   * `local-draft` 是旧版单例 ID，保留兼容。
+   */
+  const isLocalDraft = computed(
+    () => id.value === 'demo' || id.value === 'local-draft' || id.value.startsWith('local_')
+  );
+
   const zoom = ref<number>(1);
   const saveStatus = ref<'saved' | 'saving' | 'unsaved' | 'error'>('saved');
   const lastSavedTime = ref<string>('刚刚');
 
-  // 控制加载云端/切换简历时静默暂停自动保存，避免竞态覆盖
-  const isAutoSavePaused = ref(false);
+  /**
+   * 自动保存暂停锁。
+   *
+   * 旧实现用 400ms 定时器解锁，慢网络下云端响应回来时锁早已释放，
+   * 加载过程中的响应式写入会触发一次 PUT 把刚拉到的数据再写回去。
+   * 现在改为 promise 作用域的引用计数：调用方用 try/finally 保证成对释放。
+   */
+  const pauseDepth = ref(0);
+  const isAutoSavePaused = computed(() => pauseDepth.value > 0);
+
+  function suspendAutoSave(): () => void {
+    pauseDepth.value += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      pauseDepth.value = Math.max(0, pauseDepth.value - 1);
+    };
+  }
+
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // 触发防抖保存
@@ -30,6 +58,7 @@ export const useResumeStore = defineStore('resume', () => {
     if (debounceTimer) clearTimeout(debounceTimer);
 
     debounceTimer = setTimeout(async () => {
+      debounceTimer = null;
       await saveResume();
     }, 2500);
   }
@@ -37,6 +66,34 @@ export const useResumeStore = defineStore('resume', () => {
   // 获取指定简历的本地草稿 Storage Key
   function getDraftKey(resumeId: string): string {
     return `open_resume_draft:${resumeId}`;
+  }
+
+  /** 同步落盘当前草稿，用于“新建/重置”这类需要立刻可见的场景 */
+  function persistLocalDraft() {
+    writeLocalDraft();
+  }
+
+  /** 生成游客草稿 ID（不使用 'local-draft' 单例，避免多份草稿互相覆盖） */
+  function createLocalId(): string {
+    const uuid =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    return `local_${uuid}`;
+  }
+
+  /** 新建一份本地草稿：先落 ID 与示例内容，再立刻写入 localStorage */
+  function createLocalDraft(
+    targetId: string,
+    options: { title?: string; templateId?: string } = {}
+  ) {
+    id.value = targetId;
+    content.value = JSON.parse(JSON.stringify(DEFAULT_RESUME_CONTENT));
+    themeConfig.value = JSON.parse(JSON.stringify(DEFAULT_THEME_CONFIG));
+    title.value = options.title ?? '未命名简历';
+    if (options.templateId) templateId.value = options.templateId;
+    saveStatus.value = 'saved';
+    persistLocalDraft();
   }
 
   // 从本地恢复草稿
@@ -61,7 +118,10 @@ export const useResumeStore = defineStore('resume', () => {
     return false;
   }
 
-  // 安全加载外部数据（原子化替换，配合锁暂停自动保存）
+  /**
+   * 安全加载外部数据（原子化替换）。
+   * 调用方需自行用 `suspendAutoSave()` 包住云端请求，避免请求期间的用户编辑丢失。
+   */
   function loadResumeData(data: {
     id: string;
     title?: string;
@@ -69,8 +129,10 @@ export const useResumeStore = defineStore('resume', () => {
     content?: ResumeContent;
     themeConfig?: ThemeConfig;
   }) {
-    isAutoSavePaused.value = true;
-    if (debounceTimer) clearTimeout(debounceTimer);
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
 
     id.value = data.id;
     if (data.title) title.value = data.title;
@@ -83,47 +145,58 @@ export const useResumeStore = defineStore('resume', () => {
     }
 
     saveStatus.value = 'saved';
-    // 延迟解除保存锁，防止 watch 的响应队列立即触发误保存
-    setTimeout(() => {
-      isAutoSavePaused.value = false;
-    }, 400);
   }
 
-  // 保存简历至本地或云端
-  async function saveResume() {
-    saveStatus.value = 'saving';
+  /** 本地落盘：失败（如 QuotaExceededError）只记录，不影响云端保存 */
+  function writeLocalDraft(): boolean {
+    const currentDraft = {
+      id: id.value,
+      title: title.value,
+      templateId: templateId.value,
+      content: content.value,
+      themeConfig: themeConfig.value,
+      savedAt: Date.now()
+    };
     try {
-      // 1. 本地存储保底：按简历 ID 独立保存
-      const currentDraft = {
-        id: id.value,
-        title: title.value,
-        templateId: templateId.value,
-        content: content.value,
-        themeConfig: themeConfig.value,
-        savedAt: Date.now()
-      };
       localStorage.setItem(getDraftKey(id.value), JSON.stringify(currentDraft));
-      // 兼容老单机草稿 key
       if (id.value === 'local-draft') {
         localStorage.setItem('open_resume_draft', JSON.stringify(currentDraft));
       }
+      return true;
+    } catch (err) {
+      console.warn('本地草稿写入失败（不影响云端保存）:', err);
+      return false;
+    }
+  }
+
+  // 保存串行化：在途时只标记一次“待保存”，避免连续编辑产生并发 PUT
+  let isSaving = false;
+  let pendingSave = false;
+
+  async function saveResume(): Promise<void> {
+    if (isSaving) {
+      pendingSave = true;
+      return;
+    }
+
+    isSaving = true;
+    saveStatus.value = 'saving';
+    try {
+      // 1. 本地存储保底（独立 try/catch，配额不足不得阻断云端保存）
+      writeLocalDraft();
 
       // 2. 若已登录且属于真实云端简历，同步至 Cloudflare D1
-      if (authStore.isLoggedIn && id.value !== 'local-draft' && id.value !== 'demo') {
-        const res = await fetch(`/api/resumes/${id.value}`, {
+      if (authStore.isLoggedIn && !isLocalDraft.value) {
+        const result = await apiFetch(`/api/resumes/${id.value}`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authStore.token}`
-          },
-          body: JSON.stringify({
+          body: {
             title: title.value,
             templateId: templateId.value,
             content: content.value,
             themeConfig: themeConfig.value
-          })
+          }
         });
-        if (!res.ok) throw new Error('云端保存失败');
+        if (!result.ok) throw new Error(result.message || '云端保存失败');
       }
 
       saveStatus.value = 'saved';
@@ -132,6 +205,13 @@ export const useResumeStore = defineStore('resume', () => {
     } catch (err) {
       console.error(err);
       saveStatus.value = 'error';
+    } finally {
+      isSaving = false;
+      if (pendingSave) {
+        pendingSave = false;
+        // 在途期间有新的编辑：再跑一次，保证最后一次修改一定落盘
+        if (!isAutoSavePaused.value) await saveResume();
+      }
     }
   }
 
@@ -167,12 +247,12 @@ export const useResumeStore = defineStore('resume', () => {
 
   // 智能卡页（Auto-Fit）算法：自动解算最佳间距与字号，完美将内容收敛至单页 A4
   function autoFitOnePage(currentHeight?: number): { success: boolean; message: string } {
-    const targetHeight = 1122; // A4 纸 96DPI 标准高度 1122.52px
-    // 准确读取内部内容实际 scrollHeight，避免纸张自身的 min-height: 297mm 干扰测量
+    const targetHeight = A4_HEIGHT_PX;
+    // 测量内容节点而非纸张：纸张的 min-height: 297mm 会让测量值恒等于一页
     let height = currentHeight;
     if (!height) {
-      const innerTarget = document.querySelector('.a4-print-target > div') as HTMLElement | null;
-      height = innerTarget?.scrollHeight || document.querySelector('.a4-print-target')?.scrollHeight || targetHeight;
+      const doc = document.querySelector(`.a4-print-target ${RESUME_DOC_SELECTOR}`) as HTMLElement | null;
+      height = doc?.scrollHeight || targetHeight;
     }
 
     // 黄金单页阈值容差 (±15px 内无需进一步调整)
@@ -248,12 +328,17 @@ export const useResumeStore = defineStore('resume', () => {
     templateId,
     content,
     themeConfig,
+    isLocalDraft,
     zoom,
     saveStatus,
     lastSavedTime,
     isAutoSavePaused,
+    suspendAutoSave,
     loadResumeData,
     loadLocalDraft,
+    persistLocalDraft,
+    createLocalId,
+    createLocalDraft,
     saveResume,
     resetToPreset,
     clearAllData,
