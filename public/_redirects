@@ -1,0 +1,2 @@
+# Cloudflare Pages SPA 回退：所有未命中静态资源的路径交给 index.html 处理
+/* /index.html 200

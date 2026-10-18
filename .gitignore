@@ -12,6 +12,19 @@ dist
 dist-ssr
 *.local
 
+# TypeScript / Vite 构建缓存（由 vue-tsc -b 生成）
+*.tsbuildinfo
+vite.config.d.ts
+
+# Test artifacts
+test-results
+playwright-report
+blob-report
+
+# Wrangler local secrets
+.dev.vars
+.dev.vars.*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
