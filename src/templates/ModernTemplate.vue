@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { ResumeContent, ThemeConfig } from '../types/resume';
+import { safeUrl } from '../utils/url';
 import { Mail, Phone, MapPin, Globe, Github, Briefcase } from 'lucide-vue-next';
 
 const props = defineProps<{
@@ -12,10 +13,15 @@ const profile = computed(() => props.content.profile);
 const modules = computed(() => props.content.modules);
 const modulesOrder = computed(() => props.content.modulesOrder || ['work', 'projects', 'skills', 'education', 'custom']);
 
+// 用户输入的外链必须先校验协议，避免 javascript: 在公开分享页执行
+const githubUrl = computed(() => safeUrl(profile.value.github));
+const websiteUrl = computed(() => safeUrl(profile.value.website));
+
+// 注意：模板根节点不能再设置 min-height，否则内容高度测量会恒等于一页。
+// 纸张的 297mm 由外层 .a4-print-target 提供。
 const containerStyle = computed(() => ({
   fontSize: `${props.theme.fontSize}px`,
-  lineHeight: props.theme.lineHeight,
-  minHeight: '297mm'
+  lineHeight: props.theme.lineHeight
 }));
 
 const sidebarStyle = computed(() => ({
@@ -36,7 +42,7 @@ const paragraphMarginStyle = computed(() => ({
 </script>
 
 <template>
-  <div class="modern-template w-full bg-white flex min-h-[297mm] text-gray-800" :class="theme.fontFamily" :style="containerStyle">
+  <div class="modern-template resume-doc w-full bg-white flex text-slate-800" :class="theme.fontFamily" :style="containerStyle">
     <!-- 左侧侧边栏 (32% 宽度，浅色底色或主题色轻浅过渡) -->
     <div class="resume-sidebar w-[32%] bg-slate-50 border-r border-slate-200 flex flex-col gap-5 flex-shrink-0" :style="sidebarStyle">
       <!-- 头像 -->
@@ -57,32 +63,32 @@ const paragraphMarginStyle = computed(() => ({
       <!-- 联系方式 -->
       <div class="space-y-2 text-xs text-slate-600 border-t border-slate-200 pt-4">
         <div v-if="profile.phone" class="flex items-center gap-2">
-          <Phone class="w-3.5 h-3.5 text-slate-400" />
+          <Phone class="w-3.5 h-3.5 text-slate-500" />
           <span>{{ profile.phone }}</span>
         </div>
         <div v-if="profile.email" class="flex items-center gap-2">
-          <Mail class="w-3.5 h-3.5 text-slate-400" />
+          <Mail class="w-3.5 h-3.5 text-slate-500" />
           <span>{{ profile.email }}</span>
         </div>
         <div v-if="profile.location" class="flex items-center gap-2">
-          <MapPin class="w-3.5 h-3.5 text-slate-400" />
+          <MapPin class="w-3.5 h-3.5 text-slate-500" />
           <span>{{ profile.location }}</span>
         </div>
         <div v-if="profile.workYears" class="flex items-center gap-2">
-          <Briefcase class="w-3.5 h-3.5 text-slate-400" />
+          <Briefcase class="w-3.5 h-3.5 text-slate-500" />
           <span>{{ profile.workYears }}</span>
         </div>
-        <div v-if="profile.salaryExpectation" class="flex items-center gap-2 text-emerald-600 font-medium">
+        <div v-if="profile.salaryExpectation" class="flex items-center gap-2 text-emerald-700 font-medium">
           <span>💰</span>
           <span>{{ profile.salaryExpectation }}</span>
         </div>
-        <div v-if="profile.github" class="flex items-center gap-2">
-          <Github class="w-3.5 h-3.5 text-slate-400" />
-          <a :href="profile.github" target="_blank" class="hover:underline truncate text-blue-600">GitHub</a>
+        <div v-if="githubUrl" class="flex items-center gap-2">
+          <Github class="w-3.5 h-3.5 text-slate-500" />
+          <a :href="githubUrl" target="_blank" rel="noopener noreferrer" class="truncate text-slate-700 underline">GitHub</a>
         </div>
-        <div v-if="profile.website" class="flex items-center gap-2">
-          <Globe class="w-3.5 h-3.5 text-slate-400" />
-          <a :href="profile.website" target="_blank" class="hover:underline truncate text-blue-600">作品集</a>
+        <div v-if="websiteUrl" class="flex items-center gap-2">
+          <Globe class="w-3.5 h-3.5 text-slate-500" />
+          <a :href="websiteUrl" target="_blank" rel="noopener noreferrer" class="truncate text-slate-700 underline">作品集</a>
         </div>
       </div>
 
@@ -95,7 +101,7 @@ const paragraphMarginStyle = computed(() => ({
           <div v-for="item in modules.education.items" :key="item.id" class="resume-section-item">
             <div class="font-semibold text-slate-800">{{ item.school }}</div>
             <div class="text-slate-500">{{ item.major }} · {{ item.degree }}</div>
-            <div class="text-slate-400 text-[10px]">{{ item.startDate }} - {{ item.endDate }}</div>
+            <div class="text-slate-500 text-2xs">{{ item.startDate }} - {{ item.endDate }}</div>
           </div>
         </div>
       </div>
@@ -105,7 +111,7 @@ const paragraphMarginStyle = computed(() => ({
         <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
           {{ modules.skills.title }}
         </h3>
-        <div class="flex flex-wrap gap-1 text-[11px]">
+        <div class="flex flex-wrap gap-1 text-2xs">
           <span v-for="(skill, idx) in modules.skills.items" :key="idx"
                 class="bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded shadow-2xs">
             {{ skill }}
@@ -136,7 +142,7 @@ const paragraphMarginStyle = computed(() => ({
             <div v-for="item in modules.work.items" :key="item.id" class="resume-section-item">
               <div class="flex justify-between items-baseline font-semibold text-slate-900 text-xs">
                 <span>{{ item.company }} <span class="font-normal text-slate-500">· {{ item.position }}</span></span>
-                <span class="text-slate-400 text-[11px]">{{ item.startDate }} - {{ item.endDate }}</span>
+                <span class="text-slate-500 text-2xs">{{ item.startDate }} - {{ item.endDate }}</span>
               </div>
               <p class="text-xs text-slate-600 whitespace-pre-line leading-relaxed mt-1" :style="paragraphMarginStyle">
                 {{ item.description }}
@@ -156,7 +162,7 @@ const paragraphMarginStyle = computed(() => ({
             <div v-for="item in modules.projects.items" :key="item.id" class="resume-section-item">
               <div class="flex justify-between items-baseline font-semibold text-slate-900 text-xs">
                 <span>{{ item.name }} <span v-if="item.role" class="font-normal text-slate-500">({{ item.role }})</span></span>
-                <span class="text-slate-400 text-[11px]">{{ item.startDate }} - {{ item.endDate }}</span>
+                <span class="text-slate-500 text-2xs">{{ item.startDate }} - {{ item.endDate }}</span>
               </div>
               <p class="text-xs text-slate-600 whitespace-pre-line leading-relaxed mt-1" :style="paragraphMarginStyle">
                 {{ item.description }}
