@@ -62,6 +62,21 @@
   background: rgba(107, 114, 128, 0.8);
 }
 
+/*
+ * Modern 模板的侧边栏底色需要铺满整张纸，但模板根节点不能设 min-height
+ * （否则内容高度测量恒等于一页）。这里把底色画在纸张上，测量不受影响。
+ */
+.a4-print-target:has(> .modern-template) {
+  background-image: linear-gradient(
+    to right,
+    #f8fafc 0,
+    #f8fafc 32%,
+    #e2e8f0 32%,
+    #e2e8f0 calc(32% + 1px),
+    #ffffff calc(32% + 1px)
+  );
+}
+
 /* 核心 A4 打印与导出样式适配 */
 @media print {
   /* 隐藏所有界面交互操作与工具栏 (仅基于类名选择器，严禁误杀简历模板中的语义标签) */

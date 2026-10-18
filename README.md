@@ -60,15 +60,38 @@ npm run dev
 ```
 打开浏览器访问：`http://localhost:5173` 即可立即进入体验！
 
-### 3. 本地全栈开发与 Cloudflare 模拟器 (可选)
-如果需要联调 D1 数据库和后端 API：
+### 3. 本地全栈开发（前后端分离）
+开发期前后端各跑一个进程，浏览器**只访问 Vite**：
+
 ```bash
-# 初始化本地 SQLite 数据库
+# 终端 A：初始化本地 SQLite 数据库（只需一次）
 npm run d1:init:local
 
-# 启动 Cloudflare Pages 本地全栈模拟器
-npm run cf:dev
+# 终端 B：只提供 API 的 Cloudflare Pages Functions 服务
+npm run cf:dev            # → http://127.0.0.1:8787
+
+# 终端 C：前端热更新
+npm run dev               # → http://localhost:5173
 ```
+
+- 前端页面：`http://localhost:5173`（HMR 生效）
+- API 服务：`http://127.0.0.1:8787`，**不提供前端页面**；`vite.config.ts` 把 `/api` 代理过去
+- 直接访问 8787 的 `/` 会看到一个「这里只提供 API」的提示页
+
+> 这是开发场景。想验证线上行为（`dist/` 构建产物 + `_redirects` SPA 回退 + 同域部署），
+> 用 `npm run preview` 或部署到 Cloudflare Pages，不要依赖 `cf:dev`。
+
+> `wrangler.toml` 的 `[vars]` 里带了一个**仅用于本地开发**的 `JWT_SECRET`，服务端在密钥缺失时
+> 会直接返回 `50003` 而不会回退默认值。
+>
+> 开源仓库或生产部署请改用 Secret，并删除 `[vars]` 中的明文值：
+>
+> ```bash
+> npx wrangler secret put JWT_SECRET
+> ```
+>
+> 本地想换一套密钥时，创建 `.dev.vars`（已被 git 忽略）写入 `JWT_SECRET=...` 即可，
+> 它会覆盖 `wrangler.toml` 中的值。
 
 ### 4. 生产打包
 ```bash

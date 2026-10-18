@@ -370,10 +370,12 @@
 ---
 
 #### 2.2.5 快捷重命名简历
-- **接口功能**：看板中即时双击重命名，避免全量提交庞大的 content 结构。
+- **接口功能**：看板中即时重命名，只更新 `title` 与 `updated_at`，不触碰正文与主题。
 - **请求方法**：`PATCH`
-- **请求路径**：`/api/resumes/:id/title`
+- **请求路径**：`/api/resumes/:id`
 - **权限要求**：需携带 Bearer Token
+
+> 不要用 `PUT /api/resumes/:id` 做重命名：PUT 要求完整正文，缺字段时会把 `content` 写成 `{}`。
 
 **请求 Body (JSON)**：
 ```json
@@ -382,14 +384,17 @@
 }
 ```
 
+`title` 会先 `trim`，长度必须为 1–100 个字符，否则返回 `40001`。
+
 **响应 Data 结构**：
 ```json
 {
   "code": 0,
-  "message": "修改成功",
+  "message": "更新成功",
   "data": {
     "id": "res_8f7b2c9d1a3e",
-    "title": "2026最新大厂通用版-张小凡"
+    "title": "2026最新大厂通用版-张小凡",
+    "updatedAt": 1760000000
   }
 }
 ```
@@ -397,16 +402,15 @@
 ---
 
 #### 2.2.6 复制克隆简历 (Duplicate)
-- **接口功能**：以已有简历为蓝本完整深拷贝出一份全新副本。
-- **请求方法**：`POST`
-- **请求路径**：`/api/resumes/:id/duplicate`
+- **接口功能**：以已有简历为蓝本复制出一份新简历。
+- **实现方式**：无独立接口。前端先 `GET /api/resumes/:id` 读取完整数据，再 `POST /api/resumes` 创建，标题追加 `_副本`。
 - **权限要求**：需携带 Bearer Token
 
-**响应 Data 结构**：
+**响应 Data 结构**（即 `POST /api/resumes` 的返回）：
 ```json
 {
   "code": 0,
-  "message": "复制成功",
+  "message": "创建成功",
   "data": {
     "id": "res_c4d5e6f7a8b9",
     "title": "前端架构师简历_副本",
@@ -471,6 +475,55 @@
 
 **响应 Data 结构**：
 返回数据字段与 `GET /api/resumes/:id` 相同，但不包含当前用户的私有敏感账户信息。
+
+---
+
+### 2.3A 阅读统计模块 (Analytics)
+
+#### 2.3A.1 全部简历的访问汇总
+- **接口功能**：一次请求返回当前用户所有简历的浏览数、平均停留时长与下载数，供看板列表使用（替代对每份简历各发一次 `GET /resumes/:id/analytics`）。
+- **请求方法**：`GET`
+- **请求路径**：`/api/analytics/overview`
+- **权限要求**：需携带 Bearer Token
+
+**响应 Data 结构**：
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": [
+    {
+      "resumeId": "res_8f7b2c9d1a3e",
+      "totalViews": 12,
+      "avgDuration": 35,
+      "totalDownloads": 2
+    }
+  ]
+}
+```
+
+无访问记录的简历返回全 0（`LEFT JOIN` 保证不丢行）。
+
+#### 2.3A.2 单份简历阅读足迹
+- **请求方法**：`GET`
+- **请求路径**：`/api/resumes/:id/analytics`
+- **权限要求**：需携带 Bearer Token（仅简历所有者）
+
+**响应 Data 结构**：
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "totalViews": 12,
+    "avgDuration": 35,
+    "totalDownloads": 2,
+    "recentVisits": [
+      { "id": "vis_1", "duration": 42, "isDownloaded": 1, "createdAt": 1760000000 }
+    ]
+  }
+}
+```
 
 ---
 
@@ -541,6 +594,14 @@
   ]
 }
 ```
+
+---
+
+### 2.6 PDF 导出（无服务端接口）
+
+PDF 仅通过浏览器原生打印完成（`src/utils/exportPdf.ts` 的 `triggerPrintPdf`），
+用户在打印对话框中选择「另存为 PDF」。服务端不再提供 `/api/export-pdf`，
+也不再需要 Cloudflare Browser Rendering 绑定。
 
 ---
 
