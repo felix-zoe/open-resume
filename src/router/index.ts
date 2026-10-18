@@ -1,9 +1,5 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
 import HomeView from '../views/HomeView.vue';
-import EditorView from '../views/EditorView.vue';
-import DashboardView from '../views/DashboardView.vue';
-import ShareView from '../views/ShareView.vue';
-import LoginView from '../views/LoginView.vue';
 
 const routes: RouteRecordRaw[] = [
   {
@@ -14,32 +10,33 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/login',
     name: 'Login',
-    component: LoginView
+    component: () => import('../views/LoginView.vue')
   },
   {
     path: '/register',
     name: 'Register',
-    component: LoginView
+    component: () => import('../views/LoginView.vue')
   },
   {
     path: '/dashboard',
     name: 'Dashboard',
-    component: DashboardView,
+    component: () => import('../views/DashboardView.vue'),
     meta: { requiresAuth: true }
   },
   {
     path: '/editor/:id',
     name: 'Editor',
-    component: EditorView
+    component: () => import('../views/EditorView.vue')
   },
   {
     path: '/share/:id',
     name: 'Share',
-    component: ShareView
+    component: () => import('../views/ShareView.vue')
   },
   {
     path: '/:pathMatch(.*)*',
-    redirect: '/'
+    name: 'NotFound',
+    component: () => import('../views/NotFoundView.vue')
   }
 ];
 

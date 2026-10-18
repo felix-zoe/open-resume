@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { useRouter } from 'vue-router';
+import { AppButton, BrandMark } from './ui';
 import {
   Sparkles,
   FileText,
@@ -41,13 +42,11 @@ onUnmounted(() => {
   <nav class="h-16 bg-white/80 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-8 flex items-center justify-between sticky top-0 z-30 select-none">
     <!-- 左侧 Logo 与品牌标语 -->
     <router-link to="/" class="flex items-center gap-2.5 group">
-      <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-black shadow-md shadow-blue-500/20 group-hover:scale-105 transition transform">
-        R
-      </div>
+      <BrandMark size="md" class="!rounded-xl shadow-md shadow-primary-500/20 group-hover:scale-105 transition-transform" />
       <span class="font-extrabold text-base sm:text-lg bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
         OpenResume
       </span>
-      <span class="text-[10px] font-semibold bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full border border-blue-100 hidden sm:inline-block">
+      <span class="text-2xs font-semibold bg-primary-50 text-primary-600 px-2 py-0.5 rounded-full border border-primary-100 hidden sm:inline-block">
         开源免费
       </span>
     </router-link>
@@ -55,10 +54,10 @@ onUnmounted(() => {
     <!-- 右侧导航与用户态 -->
     <div class="flex items-center gap-3 sm:gap-4">
       <router-link
-        to="/editor/demo"
-        class="text-xs font-semibold text-slate-600 hover:text-blue-600 transition flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-50"
+        to="/editor/new"
+        class="text-xs font-semibold text-slate-600 hover:text-primary-600 transition flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-50"
       >
-        <Sparkles class="w-3.5 h-3.5 text-blue-500" />
+        <Sparkles class="w-3.5 h-3.5 text-primary-500" />
         <span>在线制作</span>
       </router-link>
 
@@ -69,7 +68,7 @@ onUnmounted(() => {
           class="flex items-center gap-2 p-1.5 rounded-xl hover:bg-slate-100/80 transition cursor-pointer"
         >
           <!-- 头像或首字母徽章 -->
-          <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-xs font-bold overflow-hidden shadow-2xs">
+          <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-primary-500 to-primary-500 text-white flex items-center justify-center text-xs font-bold overflow-hidden shadow-2xs">
             <img
               v-if="authStore.user?.avatarUrl"
               :src="authStore.user.avatarUrl"
@@ -108,7 +107,7 @@ onUnmounted(() => {
               <div class="font-bold text-slate-900 truncate">
                 {{ authStore.user?.nickname || '求职者' }}
               </div>
-              <div class="text-[11px] text-slate-400 font-mono truncate mt-0.5">
+              <div class="text-2xs text-slate-400 font-mono truncate mt-0.5">
                 {{ authStore.user?.email }}
               </div>
             </div>
@@ -118,16 +117,16 @@ onUnmounted(() => {
               <router-link
                 to="/dashboard"
                 @click="isMenuOpen = false"
-                class="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-700 hover:text-blue-600 hover:bg-slate-50 font-medium transition"
+                class="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-700 hover:text-primary-600 hover:bg-slate-50 font-medium transition"
               >
                 <FileText class="w-3.5 h-3.5 text-slate-400" />
                 <span>我的简历看板</span>
               </router-link>
 
               <router-link
-                to="/editor/demo"
+                to="/editor/new"
                 @click="isMenuOpen = false"
-                class="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-700 hover:text-blue-600 hover:bg-slate-50 font-medium transition"
+                class="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-700 hover:text-primary-600 hover:bg-slate-50 font-medium transition"
               >
                 <Plus class="w-3.5 h-3.5 text-slate-400" />
                 <span>新建一份简历</span>
@@ -157,12 +156,9 @@ onUnmounted(() => {
           登录
         </router-link>
 
-        <router-link
-          to="/register"
-          class="text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 px-4 py-2 rounded-xl shadow-md shadow-blue-500/20 transition transform hover:-translate-y-0.5"
-        >
+        <AppButton size="sm" class="!h-9 !rounded-xl !px-4" @click="router.push('/register')">
           免费注册
-        </router-link>
+        </AppButton>
       </template>
     </div>
   </nav>
