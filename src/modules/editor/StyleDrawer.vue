@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed } from 'vue';
+import { Check, Sparkles } from 'lucide-vue-next';
 import { useResumeStore } from '../../stores/resume';
-import { X, Check, Sparkles } from 'lucide-vue-next';
+import { AppButton, AppDrawer, AppSwitch } from '../../components/ui';
+import { useToast } from '../../composables/useToast';
+import { cx } from '../../components/ui/utils';
 
-defineProps<{
+const props = defineProps<{
   isOpen: boolean;
 }>();
 
@@ -12,16 +15,22 @@ const emit = defineEmits<{
 }>();
 
 const resumeStore = useResumeStore();
-const drawerFeedback = ref<string | null>(null);
-const drawerSuccess = ref(true);
+const toast = useToast();
 
-const triggerAutoFitInDrawer = () => {
-  const res = resumeStore.autoFitOnePage();
-  drawerFeedback.value = res.message;
-  drawerSuccess.value = res.success;
-  setTimeout(() => {
-    drawerFeedback.value = null;
-  }, 4000);
+const open = computed({
+  get: () => props.isOpen,
+  set: (value: boolean) => {
+    if (!value) emit('close');
+  }
+});
+
+const triggerAutoFit = () => {
+  const result = resumeStore.autoFitOnePage();
+  if (result.success) {
+    toast.success(result.message);
+  } else {
+    toast.error(result.message);
+  }
 };
 
 // 预设主题色系
@@ -33,214 +42,206 @@ const PRESET_COLORS = [
   { name: '经典故宫红', value: '#DC2626' },
   { name: '优雅梦幻紫', value: '#7C3AED' },
   { name: '琥珀暖阳橙', value: '#D97706' },
-  { name: '钛金低调灰', value: '#4B5563' },
+  { name: '钛金低调灰', value: '#4B5563' }
 ];
+
+const FONT_OPTIONS = [
+  { value: 'font-sans', label: '现代黑体' },
+  { value: 'font-serif', label: '雅致宋体' },
+  { value: 'font-mono', label: '等宽代码' }
+];
+
+const fontFamilyModel = computed({
+  get: () => resumeStore.themeConfig.fontFamily,
+  set: (value: string) => {
+    resumeStore.themeConfig.fontFamily = value;
+  }
+});
+
+const showBorderModel = computed({
+  get: () => resumeStore.themeConfig.showBorder,
+  set: (value: boolean) => {
+    resumeStore.themeConfig.showBorder = value;
+  }
+});
 </script>
 
 <template>
-  <!-- 侧边滑出抽屉 -->
-  <div v-if="isOpen" class="fixed inset-0 z-50 overflow-hidden no-print">
-    <!-- 遮罩背景 -->
-    <div @click="emit('close')" class="absolute inset-0 bg-black/20 backdrop-blur-2xs transition-opacity"></div>
+  <AppDrawer v-model:open="open" title="排版与样式调优" width-class="w-full max-w-sm">
+    <div class="space-y-6 text-xs text-slate-700">
+      <!-- 一键卡页 -->
+      <div class="p-3.5 rounded-xl bg-primary-50/70 border border-primary-100">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="font-bold text-slate-900 flex items-center gap-1.5">
+            <Sparkles class="w-4 h-4 text-primary-600" aria-hidden="true" />
+            <span>一键收敛到单页</span>
+          </span>
+        </div>
+        <p class="text-2xs text-slate-600 mb-2.5 leading-relaxed">
+          自动收紧行高、段落与模块间距，把内容压到一页 A4。字号与内容不会改变。
+        </p>
+        <AppButton size="sm" block @click="triggerAutoFit">立即调整</AppButton>
+      </div>
 
-    <div class="fixed inset-y-0 right-0 max-w-full flex pl-10">
-      <div class="w-screen max-w-sm bg-white shadow-2xl flex flex-col">
-        <!-- 抽屉头部 -->
-        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 class="text-sm font-bold text-gray-800">排版与样式调优</h2>
-          <button @click="emit('close')" class="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100">
-            <X class="w-4 h-4" />
+      <!-- 主题色 -->
+      <div>
+        <label class="block font-semibold text-slate-900 mb-2">主题强调色</label>
+        <div class="grid grid-cols-4 gap-2">
+          <button
+            v-for="color in PRESET_COLORS"
+            :key="color.value"
+            type="button"
+            class="h-8 rounded-lg flex items-center justify-center border border-slate-200 transition hover:scale-105"
+            :style="{ backgroundColor: color.value }"
+            :title="color.name"
+            :aria-label="color.name"
+            :aria-pressed="resumeStore.themeConfig.themeColor === color.value"
+            @click="resumeStore.themeConfig.themeColor = color.value"
+          >
+            <Check
+              v-if="resumeStore.themeConfig.themeColor === color.value"
+              class="w-4 h-4 text-white"
+              aria-hidden="true"
+            />
           </button>
         </div>
-
-        <!-- 设置项表单 -->
-        <div class="flex-1 overflow-y-auto p-5 space-y-6 text-xs text-gray-700">
-          <!-- 0. 智能一键卡页算法入口 -->
-          <div class="p-3.5 rounded-xl bg-gradient-to-br from-indigo-50 via-blue-50 to-purple-50 border border-indigo-100 shadow-2xs">
-            <div class="flex items-center justify-between mb-1.5">
-              <span class="font-bold text-indigo-950 flex items-center gap-1.5">
-                <Sparkles class="w-4 h-4 text-indigo-600" />
-                <span>智能一键卡页 (Auto-Fit)</span>
-              </span>
-              <span class="text-[10px] bg-indigo-600 text-white font-medium px-1.5 py-0.5 rounded-full">独家算法</span>
-            </div>
-            <p class="text-[11px] text-indigo-800/80 mb-2.5 leading-relaxed">
-              根据经历内容自动解算最佳间距、行高与字号阶梯组合，1 秒完美消除超页或空白。
-            </p>
-            <button
-              @click="triggerAutoFitInDrawer"
-              class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-xs shadow-sm hover:shadow transition flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Sparkles class="w-3.5 h-3.5" />
-              <span>立即自动排版至单页</span>
-            </button>
-            <p v-if="drawerFeedback" class="mt-2 text-[11px] text-center font-medium" :class="drawerSuccess ? 'text-emerald-600' : 'text-amber-600'">
-              {{ drawerFeedback }}
-            </p>
-          </div>
-
-          <!-- 1. 主题强调色 -->
-          <div>
-            <label class="block font-semibold text-gray-900 mb-2">主题强调色</label>
-            <div class="grid grid-cols-4 gap-2">
-              <button
-                v-for="color in PRESET_COLORS"
-                :key="color.value"
-                @click="resumeStore.themeConfig.themeColor = color.value"
-                class="h-8 rounded-lg flex items-center justify-center border transition relative"
-                :style="{ backgroundColor: color.value }"
-                :title="color.name"
-              >
-                <Check v-if="resumeStore.themeConfig.themeColor === color.value" class="w-4 h-4 text-white" />
-              </button>
-            </div>
-            <div class="mt-2 flex items-center gap-2">
-              <span class="text-gray-500">自定义取色：</span>
-              <input
-                type="color"
-                v-model="resumeStore.themeConfig.themeColor"
-                class="w-8 h-8 rounded border border-gray-200 cursor-pointer"
-              />
-              <span class="font-mono text-gray-400">{{ resumeStore.themeConfig.themeColor }}</span>
-            </div>
-          </div>
-
-          <!-- 1.1 字体栈选择 -->
-          <div>
-            <label class="block font-semibold text-gray-900 mb-2">字体风格</label>
-            <div class="grid grid-cols-3 gap-2">
-              <button
-                @click="resumeStore.themeConfig.fontFamily = 'font-sans'"
-                class="py-1.5 px-2 rounded-lg border text-xs text-center transition font-sans"
-                :class="resumeStore.themeConfig.fontFamily === 'font-sans' ? 'border-blue-600 bg-blue-50 text-blue-700 font-bold' : 'border-gray-200 text-gray-700 hover:bg-gray-50'"
-              >
-                现代黑体
-              </button>
-              <button
-                @click="resumeStore.themeConfig.fontFamily = 'font-serif'"
-                class="py-1.5 px-2 rounded-lg border text-xs text-center transition font-serif"
-                :class="resumeStore.themeConfig.fontFamily === 'font-serif' ? 'border-blue-600 bg-blue-50 text-blue-700 font-bold' : 'border-gray-200 text-gray-700 hover:bg-gray-50'"
-              >
-                雅致宋体
-              </button>
-              <button
-                @click="resumeStore.themeConfig.fontFamily = 'font-mono'"
-                class="py-1.5 px-2 rounded-lg border text-xs text-center transition font-mono"
-                :class="resumeStore.themeConfig.fontFamily === 'font-mono' ? 'border-blue-600 bg-blue-50 text-blue-700 font-bold' : 'border-gray-200 text-gray-700 hover:bg-gray-50'"
-              >
-                等宽代码
-              </button>
-            </div>
-          </div>
-
-          <hr class="border-gray-100" />
-
-          <!-- 2. 基准字号 (px) -->
-          <div>
-            <div class="flex justify-between items-center mb-1">
-              <label class="font-semibold text-gray-900">正文字号</label>
-              <span class="font-mono text-blue-600 font-bold">{{ resumeStore.themeConfig.fontSize }}px</span>
-            </div>
-            <p class="text-gray-400 mb-2">标题与小标题将依比例阶梯自适应</p>
-            <input
-              type="range"
-              min="12"
-              max="16"
-              step="0.5"
-              v-model.number="resumeStore.themeConfig.fontSize"
-              class="w-full accent-blue-600 cursor-pointer"
-            />
-          </div>
-
-          <!-- 3. 行高比例 -->
-          <div>
-            <div class="flex justify-between items-center mb-1">
-              <label class="font-semibold text-gray-900">文本行高</label>
-              <span class="font-mono text-blue-600 font-bold">{{ resumeStore.themeConfig.lineHeight }}</span>
-            </div>
-            <input
-              type="range"
-              min="1.3"
-              max="1.8"
-              step="0.05"
-              v-model.number="resumeStore.themeConfig.lineHeight"
-              class="w-full accent-blue-600 cursor-pointer"
-            />
-          </div>
-
-          <!-- 4. 模块垂直外间距 (核心一页纸调节) -->
-          <div class="bg-blue-50/60 p-3 rounded-lg border border-blue-100">
-            <div class="flex justify-between items-center mb-1">
-              <label class="font-semibold text-blue-950 flex items-center gap-1">
-                <span>模块垂直间距</span>
-                <span class="bg-blue-600 text-white text-[9px] px-1 py-0.2 rounded font-normal">单页微调神器</span>
-              </label>
-              <span class="font-mono text-blue-600 font-bold">{{ resumeStore.themeConfig.sectionSpacing }}px</span>
-            </div>
-            <p class="text-gray-500 text-[11px] mb-2">经历较少可拉大填满单页，经历较多可调小收紧防超页</p>
-            <input
-              type="range"
-              min="8"
-              max="32"
-              step="1"
-              v-model.number="resumeStore.themeConfig.sectionSpacing"
-              class="w-full accent-blue-600 cursor-pointer"
-            />
-          </div>
-
-          <!-- 5. 段落间距 -->
-          <div>
-            <div class="flex justify-between items-center mb-1">
-              <label class="font-semibold text-gray-900">段落间距</label>
-              <span class="font-mono text-blue-600 font-bold">{{ resumeStore.themeConfig.paragraphSpacing }}px</span>
-            </div>
-            <input
-              type="range"
-              min="2"
-              max="16"
-              step="1"
-              v-model.number="resumeStore.themeConfig.paragraphSpacing"
-              class="w-full accent-blue-600 cursor-pointer"
-            />
-          </div>
-
-          <!-- 6. 画布页面边距 (mm) -->
-          <div>
-            <div class="flex justify-between items-center mb-1">
-              <label class="font-semibold text-gray-900">页面内边距 (Padding)</label>
-              <span class="font-mono text-blue-600 font-bold">{{ resumeStore.themeConfig.pagePadding }}mm</span>
-            </div>
-            <input
-              type="range"
-              min="12"
-              max="26"
-              step="1"
-              v-model.number="resumeStore.themeConfig.pagePadding"
-              class="w-full accent-blue-600 cursor-pointer"
-            />
-          </div>
-
-          <!-- 7. 模块分割线下划线 -->
-          <div class="flex items-center justify-between pt-2">
-            <span class="font-semibold text-gray-900">展示模块下划线</span>
-            <input
-              type="checkbox"
-              v-model="resumeStore.themeConfig.showBorder"
-              class="w-4 h-4 text-blue-600 rounded accent-blue-600 cursor-pointer"
-            />
-          </div>
+        <div class="mt-2 flex items-center gap-2">
+          <label for="theme-color-custom" class="text-slate-600">自定义取色</label>
+          <input
+            id="theme-color-custom"
+            v-model="resumeStore.themeConfig.themeColor"
+            type="color"
+            class="w-8 h-8 rounded border border-slate-200 cursor-pointer"
+          />
+          <span class="font-mono text-slate-500">{{ resumeStore.themeConfig.themeColor }}</span>
         </div>
+      </div>
 
-        <!-- 底部确定按钮 -->
-        <div class="p-4 border-t border-gray-100 bg-gray-50">
+      <!-- 字体 -->
+      <div>
+        <label class="block font-semibold text-slate-900 mb-2">字体风格</label>
+        <div class="grid grid-cols-3 gap-2" role="group" aria-label="字体风格">
           <button
-            @click="emit('close')"
-            class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-xs transition"
+            v-for="font in FONT_OPTIONS"
+            :key="font.value"
+            type="button"
+            class="py-1.5 px-2 rounded-lg border text-xs text-center transition"
+            :class="
+              cx(
+                font.value,
+                fontFamilyModel === font.value
+                  ? 'border-primary-500 bg-primary-50 text-primary-700 font-bold'
+                  : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+              )
+            "
+            :aria-pressed="fontFamilyModel === font.value"
+            @click="fontFamilyModel = font.value"
           >
-            完成并应用
+            {{ font.label }}
           </button>
         </div>
       </div>
+
+      <hr class="border-slate-100" />
+
+      <!-- 数值滑块 -->
+      <div>
+        <div class="flex justify-between items-center mb-1">
+          <label for="style-font-size" class="font-semibold text-slate-900">正文字号</label>
+          <span class="font-mono text-primary-700 font-bold">{{ resumeStore.themeConfig.fontSize }}px</span>
+        </div>
+        <p class="text-2xs text-slate-500 mb-2">标题与小标题按比例阶梯自适应</p>
+        <input
+          id="style-font-size"
+          v-model.number="resumeStore.themeConfig.fontSize"
+          type="range"
+          min="12"
+          max="16"
+          step="0.5"
+          class="w-full accent-primary-600 cursor-pointer"
+        />
+      </div>
+
+      <div>
+        <div class="flex justify-between items-center mb-1">
+          <label for="style-line-height" class="font-semibold text-slate-900">文本行高</label>
+          <span class="font-mono text-primary-700 font-bold">{{ resumeStore.themeConfig.lineHeight }}</span>
+        </div>
+        <input
+          id="style-line-height"
+          v-model.number="resumeStore.themeConfig.lineHeight"
+          type="range"
+          min="1.3"
+          max="1.8"
+          step="0.05"
+          class="w-full accent-primary-600 cursor-pointer"
+        />
+      </div>
+
+      <div class="bg-primary-50/60 p-3 rounded-lg border border-primary-100">
+        <div class="flex justify-between items-center mb-1">
+          <label for="style-section-spacing" class="font-semibold text-slate-900">模块垂直间距</label>
+          <span class="font-mono text-primary-700 font-bold">
+            {{ resumeStore.themeConfig.sectionSpacing }}px
+          </span>
+        </div>
+        <p class="text-slate-600 text-2xs mb-2">内容较少可调大填满整页，内容较多可调小收紧</p>
+        <input
+          id="style-section-spacing"
+          v-model.number="resumeStore.themeConfig.sectionSpacing"
+          type="range"
+          min="8"
+          max="32"
+          step="1"
+          class="w-full accent-primary-600 cursor-pointer"
+        />
+      </div>
+
+      <div>
+        <div class="flex justify-between items-center mb-1">
+          <label for="style-paragraph-spacing" class="font-semibold text-slate-900">段落间距</label>
+          <span class="font-mono text-primary-700 font-bold">
+            {{ resumeStore.themeConfig.paragraphSpacing }}px
+          </span>
+        </div>
+        <input
+          id="style-paragraph-spacing"
+          v-model.number="resumeStore.themeConfig.paragraphSpacing"
+          type="range"
+          min="2"
+          max="16"
+          step="1"
+          class="w-full accent-primary-600 cursor-pointer"
+        />
+      </div>
+
+      <div>
+        <div class="flex justify-between items-center mb-1">
+          <label for="style-page-padding" class="font-semibold text-slate-900">页面内边距</label>
+          <span class="font-mono text-primary-700 font-bold">
+            {{ resumeStore.themeConfig.pagePadding }}mm
+          </span>
+        </div>
+        <input
+          id="style-page-padding"
+          v-model.number="resumeStore.themeConfig.pagePadding"
+          type="range"
+          min="12"
+          max="26"
+          step="1"
+          class="w-full accent-primary-600 cursor-pointer"
+        />
+      </div>
+
+      <AppSwitch
+        v-model="showBorderModel"
+        label="展示模块下划线"
+        description="关闭后各模块之间只保留留白"
+      />
     </div>
-  </div>
+
+    <template #footer>
+      <AppButton block @click="emit('close')">完成并应用</AppButton>
+    </template>
+  </AppDrawer>
 </template>

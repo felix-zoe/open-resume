@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
-import { exportResumePdf } from '../utils/exportPdf';
+import { triggerPrintPdf } from '../utils/exportPdf';
+import { apiFetch } from '../utils/http';
 import { ResumeContent, ThemeConfig } from '../types/resume';
 import { DEFAULT_RESUME_CONTENT, DEFAULT_THEME_CONFIG } from '../utils/presets';
 import ClassicTemplate from '../templates/ClassicTemplate.vue';
 import GeekTemplate from '../templates/GeekTemplate.vue';
 import ModernTemplate from '../templates/ModernTemplate.vue';
 import { Download, Sparkles, Loader2, AlertCircle } from 'lucide-vue-next';
+import { AppButton } from '../components/ui';
 
 const route = useRoute();
 const resumeId = route.params.id as string;
@@ -47,7 +49,7 @@ const handlePrint = async () => {
   isExporting.value = true;
   reportVisit(true);
   try {
-    await exportResumePdf(title.value);
+    await triggerPrintPdf(title.value);
   } finally {
     isExporting.value = false;
   }
@@ -68,25 +70,22 @@ onMounted(async () => {
   // 1. 若非 demo 则请求云端公开接口
   if (resumeId && resumeId !== 'demo' && resumeId !== 'local-draft') {
     try {
-      const res = await fetch(`/api/share/${resumeId}`);
-      const json: any = await res.json().catch(() => ({}));
-      if (!res.ok || json.code !== 0) {
+      const result = await apiFetch<any>(`/api/share/${resumeId}`, { auth: false });
+      if (!result.ok) {
         notFound.value = true;
-        if (res.status === 403 || json.code === 40301) {
+        if (result.status === 403 || result.code === 40301) {
           errorMsg.value = '该简历暂未开启公开分享，请联系求职者开启后查阅';
         } else {
           errorMsg.value = '该在线简历不存在或已失效';
         }
-      } else if (json.data) {
-        title.value = json.data.title || '个人简历';
-        templateId.value = json.data.templateId || 'classic';
-        content.value = json.data.content || content.value;
-        themeConfig.value = json.data.themeConfig || themeConfig.value;
+      } else if (result.data) {
+        title.value = result.data.title || '个人简历';
+        templateId.value = result.data.templateId || 'classic';
+        content.value = result.data.content || content.value;
+        themeConfig.value = result.data.themeConfig || themeConfig.value;
       } else {
         notFound.value = true;
       }
-    } catch {
-      notFound.value = true;
     } finally {
       loading.value = false;
     }
@@ -116,31 +115,33 @@ onUnmounted(() => {
     <!-- 顶部极简操作条 -->
     <header class="no-print w-full bg-white border-b border-slate-200 py-3 px-6 flex items-center justify-between sticky top-0 z-20 shadow-2xs">
       <div class="flex items-center gap-2">
-        <span class="font-extrabold text-sm text-blue-600">OpenResume</span>
-        <span class="text-xs text-slate-400">· 在线高清阅览</span>
+        <span class="font-extrabold text-sm text-primary-600">OpenResume</span>
+        <span class="text-xs text-slate-500">· 在线高清阅览</span>
       </div>
 
       <div class="flex items-center gap-3">
-        <router-link to="/editor/demo" class="text-xs font-semibold text-slate-600 hover:text-blue-600 flex items-center gap-1">
-          <Sparkles class="w-3.5 h-3.5 text-blue-500" />
+        <router-link to="/editor/new" class="text-xs font-semibold text-slate-600 hover:text-primary-600 flex items-center gap-1">
+          <Sparkles class="w-3.5 h-3.5 text-primary-500" />
           <span>制作我的同款简历</span>
         </router-link>
 
-        <button
+        <AppButton
+          size="sm"
+          :loading="isExporting"
+          :disabled="loading || notFound"
           @click="handlePrint"
-          :disabled="loading || notFound || isExporting"
-          class="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-wait px-3.5 py-1.5 rounded-lg shadow-sm hover:shadow transition cursor-pointer"
         >
-          <Loader2 v-if="isExporting" class="w-3.5 h-3.5 animate-spin" />
-          <Download v-else class="w-3.5 h-3.5" />
-          <span>{{ isExporting ? '生成 PDF...' : '另存为超清 PDF' }}</span>
-        </button>
+          <template #icon>
+            <Download class="w-3.5 h-3.5" aria-hidden="true" />
+          </template>
+          <span>{{ isExporting ? '准备中...' : '另存为 PDF' }}</span>
+        </AppButton>
       </div>
     </header>
 
     <!-- 加载中指示 -->
     <div v-if="loading" class="py-24 flex flex-col items-center justify-center text-slate-400 gap-3">
-      <Loader2 class="w-8 h-8 animate-spin text-blue-600" />
+      <Loader2 class="w-8 h-8 animate-spin text-primary-600" />
       <span class="text-xs">正在以毫秒级自适应排版加载简历...</span>
     </div>
 
@@ -152,14 +153,14 @@ onUnmounted(() => {
       <h3 class="text-base font-bold text-slate-800">{{ errorMsg }}</h3>
       <p class="text-xs text-slate-400 mt-1">求职者可能已更新链接或更改了该在线版本的分享权限。</p>
       <div class="mt-5">
-        <router-link to="/" class="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline">
+        <router-link to="/" class="inline-flex items-center gap-1 text-xs font-bold text-primary-600 hover:underline">
           <span>返回 OpenResume 首页</span>
         </router-link>
       </div>
     </div>
 
     <!-- 真实标准 A4 画布展示 -->
-    <main v-else class="share-main-area py-8 flex justify-center w-full overflow-x-auto">
+    <main v-else id="main-content" tabindex="-1" class="share-main-area py-8 flex justify-center w-full overflow-x-auto">
       <div class="a4-page a4-print-target bg-white shadow-xl rounded-sm" style="width: 210mm; min-height: 297mm;">
         <component
           :is="currentTemplateComponent"
