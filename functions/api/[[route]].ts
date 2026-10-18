@@ -2,84 +2,18 @@ import { Hono } from 'hono';
 import { handle } from 'hono/cloudflare-pages';
 import { cors } from 'hono/cors';
 import { sign, verify } from 'hono/jwt';
-import puppeteer from '@cloudflare/puppeteer';
 import { Env } from '../types';
+import {
+  hashPasswordPBKDF2,
+  verifyPassword,
+  requireJwtSecret,
+  isMissingSecretError
+} from '../lib/security';
 
 const app = new Hono<{ Bindings: Env }>().basePath('/api');
 
 // 全局 CORS 中间件
 app.use('*', cors());
-
-// 工具：密码哈希 (基于 Web Crypto API PBKDF2 100,000 次迭代，每用户独立随机盐)
-async function hashPasswordPBKDF2(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(password),
-    { name: 'PBKDF2' },
-    false,
-    ['deriveBits']
-  );
-  const derivedBits = await crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      salt,
-      iterations: 100000,
-      hash: 'SHA-256'
-    },
-    keyMaterial,
-    256
-  );
-  const hashHex = Array.from(new Uint8Array(derivedBits)).map(b => b.toString(16).padStart(2, '0')).join('');
-  return `pbkdf2:100000:${saltHex}:${hashHex}`;
-}
-
-// 密码校验：支持 PBKDF2 与旧版固定盐 SHA-256 平滑升级
-async function verifyPassword(password: string, storedHash: string): Promise<{ isValid: boolean; needsUpgrade: boolean }> {
-  if (storedHash.startsWith('pbkdf2:')) {
-    const parts = storedHash.split(':');
-    if (parts.length === 4) {
-      const iterations = parseInt(parts[1], 10) || 100000;
-      const saltHex = parts[2];
-      const expectedHashHex = parts[3];
-      const saltMatch = saltHex.match(/.{1,2}/g);
-      if (!saltMatch) return { isValid: false, needsUpgrade: false };
-      const salt = new Uint8Array(saltMatch.map(byte => parseInt(byte, 16)));
-      const encoder = new TextEncoder();
-      const keyMaterial = await crypto.subtle.importKey(
-        'raw',
-        encoder.encode(password),
-        { name: 'PBKDF2' },
-        false,
-        ['deriveBits']
-      );
-      const derivedBits = await crypto.subtle.deriveBits(
-        {
-          name: 'PBKDF2',
-          salt,
-          iterations,
-          hash: 'SHA-256'
-        },
-        keyMaterial,
-        256
-      );
-      const hashHex = Array.from(new Uint8Array(derivedBits)).map(b => b.toString(16).padStart(2, '0')).join('');
-      return { isValid: hashHex === expectedHashHex, needsUpgrade: false };
-    }
-  }
-
-  // 兼容旧版 SHA-256 加固定盐
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + 'open_resume_salt_2026');
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const legacyHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-  if (legacyHash === storedHash) {
-    return { isValid: true, needsUpgrade: true };
-  }
-  return { isValid: false, needsUpgrade: false };
-}
 
 // 鉴权中间件辅助函数
 async function getAuthUserId(c: any): Promise<string | null> {
@@ -87,11 +21,20 @@ async function getAuthUserId(c: any): Promise<string | null> {
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.substring(7);
   try {
-    const payload = await verify(token, c.env.JWT_SECRET || 'open-resume-dev-secret-key-change-in-prod', 'HS256');
+    // 密钥缺失时抛错，由调用方决定返回 50003，而不是把所有人当成未登录
+    const payload = await verify(token, requireJwtSecret(c.env), 'HS256');
     return (payload as any).userId || null;
   } catch {
     return null;
   }
+}
+
+/** 把密钥缺失映射为可诊断的 50003，避免暴露堆栈细节 */
+function secretErrorResponse(c: any) {
+  return c.json(
+    { code: 50003, message: '服务端未配置 JWT_SECRET，请管理员注入环境变量', data: null },
+    500
+  );
 }
 
 // ======================= 1. 认证模块 (Auth) =======================
@@ -116,10 +59,16 @@ app.post('/auth/register', async (c) => {
     'INSERT INTO users (id, email, password_hash, nickname) VALUES (?, ?, ?, ?)'
   ).bind(userId, email, passwordHash, userNick).run();
 
-  const token = await sign(
-    { userId, email, exp: Math.floor(Date.now() / 1000) + 7 * 86400 },
-    c.env.JWT_SECRET || 'open-resume-dev-secret-key-change-in-prod'
-  );
+  let token: string;
+  try {
+    token = await sign(
+      { userId, email, exp: Math.floor(Date.now() / 1000) + 7 * 86400 },
+      requireJwtSecret(c.env)
+    );
+  } catch (err) {
+    if (isMissingSecretError(err)) return secretErrorResponse(c);
+    throw err;
+  }
 
   return c.json({
     code: 0,
@@ -161,10 +110,16 @@ app.post('/auth/login', async (c) => {
     }
   }
 
-  const token = await sign(
-    { userId: user.id, email: user.email, exp: Math.floor(Date.now() / 1000) + 7 * 86400 },
-    c.env.JWT_SECRET || 'open-resume-dev-secret-key-change-in-prod'
-  );
+  let token: string;
+  try {
+    token = await sign(
+      { userId: user.id, email: user.email, exp: Math.floor(Date.now() / 1000) + 7 * 86400 },
+      requireJwtSecret(c.env)
+    );
+  } catch (err) {
+    if (isMissingSecretError(err)) return secretErrorResponse(c);
+    throw err;
+  }
 
   return c.json({
     code: 0,
@@ -328,7 +283,37 @@ app.put('/resumes/:id', async (c) => {
   });
 });
 
-// 2.5 切换简历公开分享开关
+// 2.5 重命名简历（只改标题，不触碰 content/themeConfig）
+// 与 PUT 分开：PUT 需要完整正文，缺字段时会把内容写成 {}，不适合列表页改名
+app.patch('/resumes/:id', async (c) => {
+  const userId = await getAuthUserId(c);
+  if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
+
+  const resumeId = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const title = typeof body.title === 'string' ? body.title.trim() : '';
+
+  if (title.length < 1 || title.length > 100) {
+    return c.json({ code: 40001, message: '标题需为 1-100 个字符', data: null }, 400);
+  }
+
+  const existing: any = await c.env.DB.prepare('SELECT user_id FROM resumes WHERE id = ?').bind(resumeId).first();
+  if (!existing) return c.json({ code: 40401, message: '简历不存在', data: null }, 404);
+  if (existing.user_id !== userId) return c.json({ code: 40301, message: '无权修改该简历', data: null }, 403);
+
+  const now = Math.floor(Date.now() / 1000);
+  await c.env.DB.prepare('UPDATE resumes SET title = ?, updated_at = ? WHERE id = ?')
+    .bind(title, now, resumeId)
+    .run();
+
+  return c.json({
+    code: 0,
+    message: '更新成功',
+    data: { id: resumeId, title, updatedAt: now }
+  });
+});
+
+// 2.6 切换简历公开分享开关
 app.post('/resumes/:id/share', async (c) => {
   const userId = await getAuthUserId(c);
   if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
@@ -350,7 +335,7 @@ app.post('/resumes/:id/share', async (c) => {
   });
 });
 
-// 2.6 删除简历 (显式级联清理关联历史与访问记录)
+// 2.7 删除简历 (显式级联清理关联历史与访问记录)
 app.delete('/resumes/:id', async (c) => {
   const userId = await getAuthUserId(c);
   if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
@@ -367,7 +352,7 @@ app.delete('/resumes/:id', async (c) => {
   return c.json({ code: 0, message: '删除成功', data: { id: resumeId } });
 });
 
-// 2.6 获取求职投递反馈与阅读足迹统计 (HR Read Analytics)
+// 2.8 获取求职投递反馈与阅读足迹统计 (HR Read Analytics)
 app.get('/resumes/:id/analytics', async (c) => {
   const userId = await getAuthUserId(c);
   if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
@@ -397,7 +382,35 @@ app.get('/resumes/:id/analytics', async (c) => {
   });
 });
 
-// 2.7 获取历史版本时光机列表
+// 2.9 全部简历的访问汇总（一条查询替代 N 次 /resumes/:id/analytics）
+app.get('/analytics/overview', async (c) => {
+  const userId = await getAuthUserId(c);
+  if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT r.id AS resumeId,
+            COUNT(v.id) AS totalViews,
+            COALESCE(AVG(v.duration_seconds), 0) AS avgDuration,
+            COALESCE(SUM(v.is_downloaded), 0) AS totalDownloads
+       FROM resumes r
+       LEFT JOIN resume_visits v ON v.resume_id = r.id
+      WHERE r.user_id = ?
+      GROUP BY r.id`
+  ).bind(userId).all();
+
+  return c.json({
+    code: 0,
+    message: 'success',
+    data: (results || []).map((row: any) => ({
+      resumeId: row.resumeId,
+      totalViews: Number(row.totalViews) || 0,
+      avgDuration: Math.round(Number(row.avgDuration) || 0),
+      totalDownloads: Number(row.totalDownloads) || 0
+    }))
+  });
+});
+
+// 2.10 获取历史版本时光机列表
 app.get('/resumes/:id/history', async (c) => {
   const userId = await getAuthUserId(c);
   if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
@@ -413,7 +426,7 @@ app.get('/resumes/:id/history', async (c) => {
   return c.json({ code: 0, message: 'success', data: results || [] });
 });
 
-// 2.8 恢复指定的历史版本快照
+// 2.11 恢复指定的历史版本快照
 app.post('/resumes/:id/restore/:historyId', async (c) => {
   const userId = await getAuthUserId(c);
   if (!userId) return c.json({ code: 40101, message: '请先登录', data: null }, 401);
@@ -587,98 +600,6 @@ app.post('/share/:id/visit', async (c) => {
   return c.json({ code: 0, message: 'ok', data: { visitId } });
 });
 
-// ======================= 5. 云端无头渲染导出模块 (PDF Export) =======================
-
-// 5.1 云端极速生成高清矢量 PDF (需登录并限制提交体积)
-app.post('/export-pdf', async (c) => {
-  const userId = await getAuthUserId(c);
-  if (!userId) {
-    return c.json({ code: 40101, message: '请先登录后使用云端高清 PDF 渲染导出服务', data: null }, 401);
-  }
-
-  const { html, title } = await c.req.json().catch(() => ({}));
-  if (!html || typeof html !== 'string') {
-    return c.json({ code: 40001, message: 'HTML 内容不能为空', data: null }, 400);
-  }
-
-  if (html.length > 2 * 1024 * 1024) {
-    return c.json({ code: 40002, message: 'HTML 模板体积超出限制 (最大 2MB)', data: null }, 400);
-  }
-
-  // 安全过滤恶意的 <base> 标签
-  const sanitizedHtml = html.replace(/<base[^>]*>/gi, '');
-
-  // 检查是否具备 Cloudflare Browser Run 绑定
-  if (!c.env.MYBROWSER) {
-    return c.json({
-      code: 501,
-      message: 'Cloudflare Browser Rendering 绑定未配置，请使用本地原生打印或在 Dashboard 开启 Browser Run',
-      data: null
-    }, 501);
-  }
-
-  let browser: any;
-  try {
-    // 启动 Cloudflare 边缘无头 Chromium 实例
-    browser = await puppeteer.launch(c.env.MYBROWSER);
-    const page = await browser.newPage();
-
-    // 设定 210mm A4 视口与屏幕 DPR
-    await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 2 });
-
-    // 注入页面经过安全过滤的 HTML
-    await page.setContent(sanitizedHtml, {
-      waitUntil: 'load'
-    });
-
-    // 等待网页可能存在的图片（头像等）加载完成
-    await page.evaluate(async () => {
-      const images = Array.from(document.images);
-      await Promise.all(
-        images.map((img) => {
-          if (img.complete) return Promise.resolve();
-          return new Promise((resolve) => {
-            img.onload = resolve;
-            img.onerror = resolve;
-          });
-        })
-      );
-    });
-
-    // 等待字体就绪
-    await page.evaluateHandle('document.fonts.ready');
-
-    // 导出标准 A4 矢量 PDF
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
-      preferCSSPageSize: true
-    });
-
-    await browser.close();
-
-    const fileName = (title || '简历').replace(/[\\/:*?"<>|]/g, '_');
-
-    return new Response(pdfBuffer, {
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}.pdf"`,
-        'Cache-Control': 'no-cache'
-      }
-    });
-  } catch (err: any) {
-    if (browser) {
-      try { await browser.close(); } catch {}
-    }
-    console.error('云端 PDF 导出失败:', err);
-    return c.json({
-      code: 50001,
-      message: err.message || '云端无头渲染生成失败',
-      data: null
-    }, 500);
-  }
-});
 
 // 导出 Cloudflare Pages Functions 处理入口
 export const onRequest = handle(app);
