@@ -3,8 +3,10 @@ import { ref, computed } from 'vue';
 import { useResumeStore } from '../../stores/resume';
 import { useAuthStore } from '../../stores/auth';
 import { apiFetch } from '../../utils/http';
+import { processAvatar, validateAvatarFile } from '../../utils/image';
+import { validateEmail, validatePhone, validateUrl } from '../../utils/validation';
 import { useToast } from '../../composables/useToast';
-import { User, Mail, Phone, MapPin, Globe, Github, Image as ImageIcon, Loader2 } from 'lucide-vue-next';
+import { User, Mail, Phone, MapPin, Globe, Github, Image as ImageIcon, Loader2, Trash2 } from 'lucide-vue-next';
 
 const resumeStore = useResumeStore();
 const authStore = useAuthStore();
@@ -14,24 +16,74 @@ const profile = computed(() => resumeStore.content.profile);
 const isUploading = ref(false);
 const toast = useToast();
 
-// 头像上传：若已登录则上传至 Cloudflare R2，未登录则本地 Base64 预览
+/**
+ * 字段校验状态。
+ *
+ * 只在「失焦后」或「已有错误且用户继续输入」时展示，避免用户刚敲第一个
+ * 数字就看到红字。空值不报错——必填提示留给导出前的内容体检。
+ */
+const touched = ref<Record<string, boolean>>({});
+
+function markTouched(field: string) {
+  touched.value = { ...touched.value, [field]: true };
+}
+
+const phoneError = computed(() => {
+  if (!touched.value.phone || !profile.value.phone) return '';
+  const result = validatePhone(profile.value.phone);
+  return result.valid ? '' : result.message;
+});
+
+const emailError = computed(() => {
+  if (!touched.value.email || !profile.value.email) return '';
+  const result = validateEmail(profile.value.email);
+  return result.valid ? '' : result.message;
+});
+
+const githubError = computed(() => {
+  if (!touched.value.github || !profile.value.github) return '';
+  const result = validateUrl(profile.value.github);
+  return result.valid ? '' : result.message;
+});
+
+const websiteError = computed(() => {
+  if (!touched.value.website || !profile.value.website) return '';
+  const result = validateUrl(profile.value.website);
+  return result.valid ? '' : result.message;
+});
+
+/**
+ * 头像上传。
+ *
+ * 无论是否登录，都先在本地裁剪压缩成 300×300、≤80KB 的 WebP，
+ * 再把压缩后的结果上传到 R2——直接传原图既浪费流量，也会让游客草稿
+ * 的 base64 撑爆存储配额。
+ */
 const handleAvatarFile = async (e: Event) => {
   const target = e.target as HTMLInputElement;
   const file = target.files?.[0];
   if (!file) return;
 
-  if (file.size > 2 * 1024 * 1024) {
-    toast.error('图片大小请小于 2MB');
+  const validation = await validateAvatarFile(file);
+  if (!validation.ok) {
+    toast.error(validation.message);
     target.value = '';
     return;
   }
 
-  // 1. 若已登录，上传至 Cloudflare R2
-  if (authStore.isLoggedIn && authStore.token) {
-    isUploading.value = true;
-    try {
+  isUploading.value = true;
+  try {
+    const processed = await processAvatar(file);
+
+    // 先落到本地，保证即使上传失败用户也能看到照片
+    profile.value.avatar = processed.dataUrl;
+    profile.value.showAvatar = true;
+
+    if (authStore.isLoggedIn && authStore.token) {
+      // 把 data URL 转回 Blob 再上传，避免把 base64 文本当文件传
+      const blob = await (await fetch(processed.dataUrl)).blob();
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', new File([blob], 'avatar.webp', { type: blob.type }));
 
       const result = await apiFetch<{ url?: string }>('/api/upload/avatar', {
         method: 'POST',
@@ -40,29 +92,22 @@ const handleAvatarFile = async (e: Event) => {
 
       if (result.ok && result.data?.url) {
         profile.value.avatar = result.data.url;
-        profile.value.showAvatar = true;
       } else {
-        toast.error(result.message || '上传头像至云端失败，已保留本地预览');
-        fallbackToBase64(file);
+        toast.error(result.message || '头像已压缩保存到本地，但上传云端失败');
       }
-    } finally {
-      isUploading.value = false;
-      target.value = '';
     }
-  } else {
-    // 2. 未登录单机体验，使用本地 Base64 预览
-    fallbackToBase64(file);
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '头像处理失败，请换一张图片');
+  } finally {
+    isUploading.value = false;
     target.value = '';
   }
 };
 
-const fallbackToBase64 = (file: File) => {
-  const reader = new FileReader();
-  reader.onload = (uploadEvent) => {
-    profile.value.avatar = uploadEvent.target?.result as string;
-    profile.value.showAvatar = true;
-  };
-  reader.readAsDataURL(file);
+/** 移除头像 */
+const removeAvatar = () => {
+  profile.value.avatar = '';
+  profile.value.showAvatar = false;
 };
 </script>
 
@@ -92,9 +137,19 @@ const fallbackToBase64 = (file: File) => {
             class="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
           />
         </div>
-        <div class="mt-1 flex items-center gap-1">
+        <div class="mt-1 flex items-center gap-2">
           <input type="checkbox" id="showAvatar" v-model="profile.showAvatar" class="w-3.5 h-3.5 rounded text-primary-600" />
           <label for="showAvatar" class="text-2xs text-slate-500 cursor-pointer">显示头像</label>
+          <button
+            v-if="profile.avatar"
+            type="button"
+            class="ml-auto inline-flex items-center gap-0.5 text-2xs text-slate-500 hover:text-danger-600 transition"
+            title="移除头像"
+            @click="removeAvatar"
+          >
+            <Trash2 class="w-3 h-3" aria-hidden="true" />
+            <span>移除</span>
+          </button>
         </div>
       </div>
 
@@ -124,29 +179,46 @@ const fallbackToBase64 = (file: File) => {
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-slate-600 mb-1">联系电话 *</label>
+          <label for="profile-phone" class="block text-xs font-medium text-slate-600 mb-1">联系电话 *</label>
           <div class="relative">
-            <Phone class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+            <Phone class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" aria-hidden="true" />
             <input
-              type="text"
+              id="profile-phone"
+              type="tel"
+              inputmode="tel"
               v-model="profile.phone"
               placeholder="如：13800138000"
-              class="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition"
+              :aria-invalid="!!phoneError || undefined"
+              :aria-describedby="phoneError ? 'profile-phone-error' : undefined"
+              class="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border rounded-lg focus:ring-1 focus:ring-primary-500 outline-none transition"
+              :class="phoneError ? 'border-danger-300 focus:border-danger-500' : 'border-slate-200 focus:border-primary-500'"
+              @blur="markTouched('phone')"
             />
           </div>
+          <p v-if="phoneError" id="profile-phone-error" class="text-2xs font-medium text-danger-600 mt-1" role="alert">
+            {{ phoneError }}
+          </p>
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-slate-600 mb-1">电子邮箱 *</label>
+          <label for="profile-email" class="block text-xs font-medium text-slate-600 mb-1">电子邮箱 *</label>
           <div class="relative">
-            <Mail class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+            <Mail class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" aria-hidden="true" />
             <input
+              id="profile-email"
               type="email"
               v-model="profile.email"
               placeholder="如：xiaofan@example.com"
-              class="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition"
+              :aria-invalid="!!emailError || undefined"
+              :aria-describedby="emailError ? 'profile-email-error' : undefined"
+              class="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border rounded-lg focus:ring-1 focus:ring-primary-500 outline-none transition"
+              :class="emailError ? 'border-danger-300 focus:border-danger-500' : 'border-slate-200 focus:border-primary-500'"
+              @blur="markTouched('email')"
             />
           </div>
+          <p v-if="emailError" id="profile-email-error" class="text-2xs font-medium text-danger-600 mt-1" role="alert">
+            {{ emailError }}
+          </p>
         </div>
       </div>
     </div>
@@ -190,29 +262,45 @@ const fallbackToBase64 = (file: File) => {
     <!-- 社交链接 -->
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
-        <label class="block text-xs font-medium text-slate-600 mb-1">GitHub 主页</label>
+        <label for="profile-github" class="block text-xs font-medium text-slate-600 mb-1">GitHub 主页</label>
         <div class="relative">
-          <Github class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+          <Github class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" aria-hidden="true" />
           <input
+            id="profile-github"
             type="text"
             v-model="profile.github"
             placeholder="https://github.com/..."
-            class="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition"
+            :aria-invalid="!!githubError || undefined"
+            :aria-describedby="githubError ? 'profile-github-error' : undefined"
+            class="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border rounded-lg focus:ring-1 focus:ring-primary-500 outline-none transition"
+            :class="githubError ? 'border-danger-300 focus:border-danger-500' : 'border-slate-200 focus:border-primary-500'"
+            @blur="markTouched('github')"
           />
         </div>
+        <p v-if="githubError" id="profile-github-error" class="text-2xs font-medium text-danger-600 mt-1" role="alert">
+          {{ githubError }}
+        </p>
       </div>
 
       <div>
-        <label class="block text-xs font-medium text-slate-600 mb-1">个人主页 / 作品集</label>
+        <label for="profile-website" class="block text-xs font-medium text-slate-600 mb-1">个人主页 / 作品集</label>
         <div class="relative">
-          <Globe class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+          <Globe class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" aria-hidden="true" />
           <input
+            id="profile-website"
             type="text"
             v-model="profile.website"
             placeholder="https://yourblog.com"
-            class="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition"
+            :aria-invalid="!!websiteError || undefined"
+            :aria-describedby="websiteError ? 'profile-website-error' : undefined"
+            class="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border rounded-lg focus:ring-1 focus:ring-primary-500 outline-none transition"
+            :class="websiteError ? 'border-danger-300 focus:border-danger-500' : 'border-slate-200 focus:border-primary-500'"
+            @blur="markTouched('website')"
           />
         </div>
+        <p v-if="websiteError" id="profile-website-error" class="text-2xs font-medium text-danger-600 mt-1" role="alert">
+          {{ websiteError }}
+        </p>
       </div>
     </div>
 

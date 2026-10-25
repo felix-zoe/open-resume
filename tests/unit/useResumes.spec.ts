@@ -63,9 +63,19 @@ describe('useResumes', () => {
     expect(loading.value).toBe(false);
     expect(calls.map((c) => c.url).sort()).toEqual(['/api/analytics/overview', '/api/resumes']);
     expect(resumes.value).toHaveLength(2);
-    expect(resumes.value[0].stats).toEqual({ totalViews: 12, avgDuration: 35, totalDownloads: 2 });
+    expect(resumes.value[0].stats).toEqual({
+      totalViews: 12,
+      uniqueVisitors: 0,
+      avgDuration: 35,
+      totalDownloads: 2
+    });
     // 汇总缺失的简历降级为 0，而不是 undefined
-    expect(resumes.value[1].stats).toEqual({ totalViews: 0, avgDuration: 0, totalDownloads: 0 });
+    expect(resumes.value[1].stats).toEqual({
+      totalViews: 0,
+      uniqueVisitors: 0,
+      avgDuration: 0,
+      totalDownloads: 0
+    });
   });
 
   it('汇总接口失败时列表仍可用', async () => {

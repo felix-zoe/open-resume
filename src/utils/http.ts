@@ -52,9 +52,24 @@ function currentPath(): string {
 // 并发请求可能同时收到 401：只处理第一次，避免重复登出/重复跳转
 let lastUnauthorizedAt = 0;
 
+/**
+ * 哪些 401 不代表「登录态失效」。
+ *
+ * - `/api/auth/*`：登录/注册的 401 是密码错误；
+ * - `/api/s/*`、`/api/share/*`：公开分享的 401 是「分享密码错误」。
+ *   访客本来就没登录，把他踢到登录页既无理，也会丢掉他正在看的简历。
+ */
+function isCredentialErrorPath(path: string): boolean {
+  return (
+    path.startsWith('/api/auth/') ||
+    path.startsWith('/api/s/') ||
+    path.startsWith('/api/share/')
+  );
+}
+
 function notifyUnauthorized(status: number, path: string) {
-  // 登录/注册接口的 401 是“密码错误”，不能触发登出
-  if (path.startsWith('/api/auth/')) return;
+  // 这些 401 是“密码错误”，不能触发登出
+  if (isCredentialErrorPath(path)) return;
   if (status !== 401) return;
   // 已经在登录页时忽略，避免死循环
   if (typeof window !== 'undefined' && window.location.pathname.startsWith('/login')) return;

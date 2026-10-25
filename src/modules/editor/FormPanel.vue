@@ -8,6 +8,7 @@ import SectionProjects from './SectionProjects.vue';
 import SectionSkills from './SectionSkills.vue';
 import SectionEducation from './SectionEducation.vue';
 import SectionCustom from './SectionCustom.vue';
+import ModuleManagerDrawer from '../../components/editor/ModuleManagerDrawer.vue';
 import {
   User,
   Briefcase,
@@ -19,8 +20,7 @@ import {
   ChevronUp,
   Eye,
   EyeOff,
-  ArrowUp,
-  ArrowDown
+  SlidersHorizontal
 } from 'lucide-vue-next';
 
 const resumeStore = useResumeStore();
@@ -34,6 +34,8 @@ const openSections = ref<Record<string, boolean>>({
   education: true,
   custom: false
 });
+
+const isModuleManagerOpen = ref(false);
 
 const toggleSection = (key: string) => {
   openSections.value[key] = !openSections.value[key];
@@ -55,25 +57,13 @@ const getModuleIcon = (key: string) => {
 const getModuleName = (key: keyof ResumeModules) => {
   return resumeStore.content.modules[key]?.title || '模块';
 };
-
-// 模块上下移动换序
-const moveModule = (index: number, direction: 'up' | 'down') => {
-  const order = [...resumeStore.content.modulesOrder];
-  const targetIndex = direction === 'up' ? index - 1 : index + 1;
-  if (targetIndex >= 0 && targetIndex < order.length) {
-    const temp = order[index];
-    order[index] = order[targetIndex];
-    order[targetIndex] = temp;
-    resumeStore.content.modulesOrder = order;
-  }
-};
 </script>
 
 <template>
-  <aside class="w-full lg:w-[480px] xl:w-[520px] bg-white border-r border-slate-200 flex flex-col h-full min-h-0 overflow-y-auto no-print">
+  <aside class="w-full lg:w-[420px] xl:w-[480px] bg-white border-r border-slate-200 flex flex-col h-full min-h-0 overflow-y-auto no-print">
     <div class="p-4 sm:p-5 space-y-3.5">
       <!-- 1. 固定的基本信息卡片 (不可移动顺序) -->
-      <div class="border border-slate-200 rounded-xl overflow-hidden shadow-2xs bg-white">
+      <div class="border border-slate-200 rounded-xl overflow-hidden shadow-xs bg-white">
         <div
           @click="toggleSection('profile')"
           class="px-4 py-3 bg-slate-50/80 hover:bg-slate-100 flex items-center justify-between cursor-pointer transition select-none"
@@ -89,11 +79,24 @@ const moveModule = (index: number, direction: 'up' | 'down') => {
         </div>
       </div>
 
-      <!-- 2. 动态模块卡片流 (支持上下移动换序、显隐开关) -->
+      <!-- 2. 模块管理入口：排序与显隐集中在抽屉里，卡片头只保留展开与显隐 -->
+      <button
+        type="button"
+        class="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl border border-dashed border-slate-300 hover:border-primary-400 hover:bg-primary-50/40 text-slate-600 hover:text-primary-700 transition"
+        @click="isModuleManagerOpen = true"
+      >
+        <span class="flex items-center gap-2 text-xs font-semibold">
+          <SlidersHorizontal class="w-3.5 h-3.5" aria-hidden="true" />
+          <span>管理模块顺序与显隐</span>
+        </span>
+        <span class="text-2xs text-slate-500">拖拽排序</span>
+      </button>
+
+      <!-- 3. 动态模块卡片流 -->
       <div
-        v-for="(modKey, index) in resumeStore.content.modulesOrder"
+        v-for="modKey in resumeStore.content.modulesOrder"
         :key="modKey"
-        class="border border-slate-200 rounded-xl overflow-hidden shadow-2xs bg-white transition"
+        class="border border-slate-200 rounded-xl overflow-hidden shadow-xs bg-white transition"
       >
         <div class="px-4 py-3 bg-slate-50/80 hover:bg-slate-100 flex items-center justify-between transition select-none">
           <!-- 模块标题与图标 -->
@@ -103,46 +106,26 @@ const moveModule = (index: number, direction: 'up' | 'down') => {
           >
             <component :is="getModuleIcon(modKey)" class="w-4 h-4 text-primary-600" />
             <span>{{ getModuleName(modKey) }}</span>
-            <span v-if="!resumeStore.content.modules[modKey].visible" class="text-2xs text-slate-400 font-normal">
+            <span v-if="!resumeStore.content.modules[modKey].visible" class="text-2xs text-slate-500 font-normal">
               (已隐藏)
             </span>
           </div>
 
-          <!-- 右侧操作栏：上下移动、显隐、展开折叠 -->
+          <!-- 右侧操作栏：显隐、展开折叠 -->
           <div class="flex items-center gap-1">
-            <!-- 向上移动 -->
-            <button
-              @click.stop="moveModule(index, 'up')"
-              :disabled="index === 0"
-              class="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed rounded"
-              title="上移此模块"
-            >
-              <ArrowUp class="w-3.5 h-3.5" />
-            </button>
-
-            <!-- 向下移动 -->
-            <button
-              @click.stop="moveModule(index, 'down')"
-              :disabled="index === resumeStore.content.modulesOrder.length - 1"
-              class="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed rounded"
-              title="下移此模块"
-            >
-              <ArrowDown class="w-3.5 h-3.5" />
-            </button>
-
-            <!-- 显隐开关 -->
             <button
               @click.stop="resumeStore.content.modules[modKey].visible = !resumeStore.content.modules[modKey].visible"
-              class="p-1 text-slate-400 hover:text-slate-700 rounded ml-1"
+              class="p-1 text-slate-500 hover:text-slate-800 rounded ml-1"
+              :aria-label="resumeStore.content.modules[modKey].visible ? '在简历上隐藏此模块' : '显示此模块'"
+              :aria-pressed="resumeStore.content.modules[modKey].visible"
               :title="resumeStore.content.modules[modKey].visible ? '在简历上隐藏此模块' : '显示此模块'"
             >
               <component :is="resumeStore.content.modules[modKey].visible ? Eye : EyeOff" class="w-3.5 h-3.5" />
             </button>
 
-            <!-- 展开/折叠 -->
             <button
               @click="toggleSection(modKey)"
-              class="p-1 text-slate-400 hover:text-slate-700 rounded"
+              class="p-1 text-slate-500 hover:text-slate-800 rounded"
               :aria-expanded="!!openSections[modKey]"
               :aria-label="openSections[modKey] ? '收起此模块' : '展开此模块'"
             >
@@ -161,5 +144,7 @@ const moveModule = (index: number, direction: 'up' | 'down') => {
         </div>
       </div>
     </div>
+
+    <ModuleManagerDrawer v-model:open="isModuleManagerOpen" />
   </aside>
 </template>

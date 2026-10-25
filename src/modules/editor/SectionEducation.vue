@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useResumeStore } from '../../stores/resume';
 import { EducationItem } from '../../types/resume';
 import { Plus, Trash2 } from 'lucide-vue-next';
+import MonthPicker from '../../components/editor/MonthPicker.vue';
 
 const resumeStore = useResumeStore();
 const eduModule = computed(() => resumeStore.content.modules.education);
@@ -80,24 +81,8 @@ const removeEduItem = (index: number) => {
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-2">
         <div class="grid grid-cols-2 gap-1.5">
-          <div>
-            <label class="block text-2xs font-medium text-slate-500 mb-0.5">入学时间</label>
-            <input
-              type="text"
-              v-model="item.startDate"
-              placeholder="2018.09"
-              class="w-full px-2 py-1 text-xs bg-white border border-slate-200 rounded focus:border-primary-500 outline-none"
-            />
-          </div>
-          <div>
-            <label class="block text-2xs font-medium text-slate-500 mb-0.5">毕业时间</label>
-            <input
-              type="text"
-              v-model="item.endDate"
-              placeholder="2022.06"
-              class="w-full px-2 py-1 text-xs bg-white border border-slate-200 rounded focus:border-primary-500 outline-none"
-            />
-          </div>
+          <MonthPicker v-model="item.startDate" label="入学时间" />
+          <MonthPicker v-model="item.endDate" label="毕业时间" />
         </div>
 
         <div>

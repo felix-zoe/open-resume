@@ -139,4 +139,30 @@ describe('401 全局处理', () => {
     expect(result.ok).toBe(false);
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it('分享密码错误 401 不触发登出（访客本就没登录）', async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ code: 40102, message: '访问密码不正确' }, 401)));
+
+    const result = await apiFetch('/api/s/tok123/unlock', {
+      method: 'POST',
+      body: { password: 'wrong' },
+      auth: false
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe('访问密码不正确');
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('旧版 /api/share 的 401 同样不触发登出', async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ code: 40102 }, 401)));
+
+    await apiFetch('/api/share/res_1/visit', { method: 'POST', body: {}, auth: false });
+
+    expect(handler).not.toHaveBeenCalled();
+  });
 });

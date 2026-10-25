@@ -1,9 +1,18 @@
 import { defineStore } from 'pinia';
 import { computed, ref, watch } from 'vue';
 import { ResumeContent, ThemeConfig } from '../types/resume';
-import { DEFAULT_RESUME_CONTENT, DEFAULT_THEME_CONFIG } from '../utils/presets';
-import { A4_HEIGHT_PX, RESUME_DOC_SELECTOR } from '../utils/a4';
+import {
+  DEFAULT_EN_RESUME_CONTENT,
+  DEFAULT_RESUME_CONTENT,
+  DEFAULT_THEME_CONFIG,
+  buildEmptyContent
+} from '../utils/presets';
+import { localizeModuleTitles, normalizeLocale } from '../i18n/resumeLabels';
+import type { ResumeLocale } from '../../shared/types';
+import { runAutoFit } from '../composables/useAutoFit';
 import { apiFetch } from '../utils/http';
+import { getDraft, listDrafts, putDraft, type DraftRecord } from '../utils/idb';
+import { trackEvent } from '../utils/telemetry';
 import { useAuthStore } from './auth';
 
 export const useResumeStore = defineStore('resume', () => {
@@ -25,9 +34,21 @@ export const useResumeStore = defineStore('resume', () => {
     () => id.value === 'demo' || id.value === 'local-draft' || id.value.startsWith('local_')
   );
 
+  /**
+   * 是否真的有一份「还没同步到云端」的草稿。
+   *
+   * 只看 `isLocalDraft` 不够：store 的初始 id 就是 `local-draft`，
+   * 直接访问 `/login` 的用户从没打开过编辑器，登录后却会被当成有草稿，
+   * 于是凭空创建一份默认内容的云端简历。这里要求确实写过本地草稿才算数。
+   */
+  const localDraftTouched = ref(false);
+  const hasUnsavedLocalDraft = computed(() => isLocalDraft.value && localDraftTouched.value);
+
   const zoom = ref<number>(1);
   const saveStatus = ref<'saved' | 'saving' | 'unsaved' | 'error'>('saved');
   const lastSavedTime = ref<string>('刚刚');
+  /** 云端简历的公开状态；本地草稿恒为 0（无法分享） */
+  const isPublic = ref<number>(0);
 
   /**
    * 自动保存暂停锁。
@@ -70,6 +91,8 @@ export const useResumeStore = defineStore('resume', () => {
 
   /** 同步落盘当前草稿，用于“新建/重置”这类需要立刻可见的场景 */
   function persistLocalDraft() {
+    // 真正写过盘才算「有一份待处理的草稿」，否则登录时会为一个默认内容弹窗
+    localDraftTouched.value = isLocalDraft.value;
     writeLocalDraft();
   }
 
@@ -85,37 +108,86 @@ export const useResumeStore = defineStore('resume', () => {
   /** 新建一份本地草稿：先落 ID 与示例内容，再立刻写入 localStorage */
   function createLocalDraft(
     targetId: string,
-    options: { title?: string; templateId?: string } = {}
+    options: { title?: string; templateId?: string; locale?: string } = {}
   ) {
     id.value = targetId;
-    content.value = JSON.parse(JSON.stringify(DEFAULT_RESUME_CONTENT));
+    // 游客直接进编辑器时给完整范文（能看到排版效果才知道这产品长什么样）；
+    // 英文入口给英文范文，否则「英文简历」里躺着一段中文经历
+    content.value = JSON.parse(
+      JSON.stringify(
+        normalizeLocale(options.locale) === 'en' ? DEFAULT_EN_RESUME_CONTENT : DEFAULT_RESUME_CONTENT
+      )
+    );
     themeConfig.value = JSON.parse(JSON.stringify(DEFAULT_THEME_CONFIG));
     title.value = options.title ?? '未命名简历';
     if (options.templateId) templateId.value = options.templateId;
+    // 本地草稿不可能有公开状态；不重置会继承上一份云端简历的 isPublic
+    isPublic.value = 0;
     saveStatus.value = 'saved';
     persistLocalDraft();
   }
 
-  // 从本地恢复草稿
-  function loadLocalDraft(targetId: string): boolean {
+  /** 同步读取 localStorage 里的旧草稿（迁移前格式，也是 IDB 不可用时的兜底） */
+  function readLocalStorageDraft(targetId: string): DraftRecord | null {
     try {
-      const raw = localStorage.getItem(getDraftKey(targetId)) || (targetId === 'local-draft' ? localStorage.getItem('open_resume_draft') : null);
-      if (!raw) return false;
+      const raw =
+        localStorage.getItem(getDraftKey(targetId)) ||
+        (targetId === 'local-draft' ? localStorage.getItem('open_resume_draft') : null);
+      if (!raw) return null;
       const parsed = JSON.parse(raw);
-      if (parsed && parsed.content) {
-        loadResumeData({
-          id: targetId,
-          title: parsed.title,
-          templateId: parsed.templateId,
-          content: parsed.content,
-          themeConfig: parsed.themeConfig
-        });
-        return true;
-      }
+      if (!parsed?.content) return null;
+      return {
+        id: targetId,
+        title: parsed.title,
+        templateId: parsed.templateId,
+        content: parsed.content,
+        themeConfig: parsed.themeConfig,
+        savedAt: Number(parsed.savedAt) || 0,
+      };
     } catch (e) {
       console.warn('读取本地草稿失败:', e);
+      return null;
     }
-    return false;
+  }
+
+  function applyDraft(targetId: string, draft: DraftRecord): boolean {
+    if (!draft?.content) return false;
+    loadResumeData({
+      id: targetId,
+      title: draft.title,
+      templateId: draft.templateId,
+      content: draft.content as ResumeContent,
+      themeConfig: draft.themeConfig as ThemeConfig,
+    });
+    return true;
+  }
+
+  /**
+   * 从本地恢复草稿。
+   *
+   * 同步返回：先读 localStorage（同步、快，保证首屏立即有内容），
+   * 再异步用 IDB 里的更新版本覆盖——IDB 是主存储，localStorage 只是缓存。
+   * 这样调用方不需要改成 async，也不会出现“IDB 没读完就先渲染默认数据”。
+   */
+  function loadLocalDraft(targetId: string): boolean {
+    const cached = readLocalStorageDraft(targetId);
+    const restored = cached ? applyDraft(targetId, cached) : false;
+
+    // 异步补齐：IDB 里可能有比 localStorage 更新的版本
+    void getDraft(targetId).then((record) => {
+      if (!record) return;
+      if (cached && record.savedAt <= cached.savedAt) return;
+      // 用户已经切走或换了简历，丢弃过期响应
+      if (id.value !== targetId) return;
+      applyDraft(targetId, record);
+    });
+
+    return restored;
+  }
+
+  /** 列出全部本地草稿（供工作台“本地草稿”区块使用） */
+  async function listLocalDrafts(): Promise<DraftRecord[]> {
+    return listDrafts();
   }
 
   /**
@@ -128,6 +200,7 @@ export const useResumeStore = defineStore('resume', () => {
     templateId?: string;
     content?: ResumeContent;
     themeConfig?: ThemeConfig;
+    isPublic?: number;
   }) {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
@@ -135,6 +208,8 @@ export const useResumeStore = defineStore('resume', () => {
     }
 
     id.value = data.id;
+    // 载入了本地草稿的内容 = 用户确实写过东西，登录时才值得问「要不要同步」
+    localDraftTouched.value = isLocalDraft.value;
     if (data.title) title.value = data.title;
     if (data.templateId) templateId.value = data.templateId;
     if (data.content) {
@@ -143,20 +218,31 @@ export const useResumeStore = defineStore('resume', () => {
     if (data.themeConfig) {
       themeConfig.value = JSON.parse(JSON.stringify(data.themeConfig));
     }
+    isPublic.value = typeof data.isPublic === 'number' ? data.isPublic : 0;
 
     saveStatus.value = 'saved';
   }
 
-  /** 本地落盘：失败（如 QuotaExceededError）只记录，不影响云端保存 */
+  /**
+   * 本地落盘。
+   *
+   * 主存储是 IndexedDB（容量大、异步、能放头像），localStorage 保留为同步缓存
+   * 与 IDB 不可用时的兜底。任一路径失败都只记录，不影响云端保存。
+   */
   function writeLocalDraft(): boolean {
-    const currentDraft = {
+    const currentDraft: DraftRecord = {
       id: id.value,
       title: title.value,
       templateId: templateId.value,
       content: content.value,
       themeConfig: themeConfig.value,
-      savedAt: Date.now()
+      savedAt: Date.now(),
     };
+
+    // 异步写 IDB：不阻塞输入
+    void putDraft(currentDraft);
+
+    // 同步写 localStorage：保证下次打开能立刻渲染，也覆盖隐私模式下 IDB 被禁的情况
     try {
       localStorage.setItem(getDraftKey(id.value), JSON.stringify(currentDraft));
       if (id.value === 'local-draft') {
@@ -169,9 +255,108 @@ export const useResumeStore = defineStore('resume', () => {
     }
   }
 
+  /**
+   * 把旧版 localStorage 草稿迁移到 IDB。
+   *
+   * 幂等：迁移后 localStorage 只保留只读备份（`legacy:` 前缀），
+   * 下次启动不会再迁一遍；备份保留 7 天后由 `pruneLegacyBackups` 清理。
+   */
+  const LEGACY_PREFIX = 'legacy:';
+
+  async function migrateLegacyDrafts(): Promise<number> {
+    if (typeof localStorage === 'undefined') return 0;
+    let migrated = 0;
+
+    const keys: string[] = [];
+    try {
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (key.startsWith(LEGACY_PREFIX)) continue;
+        if (key === 'open_resume_draft' || key.startsWith('open_resume_draft:')) keys.push(key);
+      }
+    } catch {
+      return 0;
+    }
+
+    for (const key of keys) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (!parsed?.content) continue;
+
+        const targetId = key === 'open_resume_draft' ? 'local-draft' : key.replace('open_resume_draft:', '');
+        const existing = await getDraft(targetId);
+        // 已有更新的记录就不覆盖
+        if (existing && existing.savedAt >= (Number(parsed.savedAt) || 0)) continue;
+
+        const ok = await putDraft({
+          id: targetId,
+          title: parsed.title ?? '未命名简历',
+          templateId: parsed.templateId ?? 'classic',
+          content: parsed.content,
+          themeConfig: parsed.themeConfig,
+          savedAt: Number(parsed.savedAt) || Date.now(),
+        });
+        if (!ok) continue;
+
+        // 保留原 localStorage 键作为同步缓存，**不删除**。
+        //
+        // 早期实现把它降级成 `legacy:` 备份再删掉原键，但 `writeLocalDraft`
+        // 仍会同步写 localStorage —— 两者语义冲突：下次启动时 `loadLocalDraft`
+        // 读不到缓存会返回 false，demo 路径随即 `resetToPreset()` 并覆盖 IDB，
+        // 迁移过的草稿就此丢失。IDB 是权威存储，localStorage 只是首屏缓存，
+        // 保留它才能保证「先渲染缓存、再用 IDB 覆盖」这条链路成立。
+        migrated += 1;
+      } catch (e) {
+        console.warn('旧草稿迁移失败:', key, e);
+      }
+    }
+
+    return migrated;
+  }
+
+  /** 清理超过保留期的旧草稿只读备份（默认 7 天） */
+  function pruneLegacyBackups(maxAgeMs = 7 * 24 * 60 * 60 * 1000): number {
+    if (typeof localStorage === 'undefined') return 0;
+    let removed = 0;
+    try {
+      const stale: string[] = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (key?.startsWith(LEGACY_PREFIX)) stale.push(key);
+      }
+
+      const now = Date.now();
+      for (const key of stale) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) continue;
+          const parsed = JSON.parse(raw);
+          const migratedAt = Number(parsed?.migratedAt) || 0;
+          // 没有时间戳的旧格式备份无法判断年龄，保留不动
+          if (migratedAt > 0 && now - migratedAt > maxAgeMs) {
+            localStorage.removeItem(key);
+            removed += 1;
+          }
+        } catch {
+          // 备份内容损坏，直接删掉
+          localStorage.removeItem(key);
+          removed += 1;
+        }
+      }
+    } catch {
+      // 隐私模式下 localStorage 可能抛错，忽略
+    }
+    return removed;
+  }
+
   // 保存串行化：在途时只标记一次“待保存”，避免连续编辑产生并发 PUT
   let isSaving = false;
   let pendingSave = false;
+  /** 本次会话是否已上报过「保存成功」 */
+  let trackedSaveOk = false;
 
   async function saveResume(): Promise<void> {
     if (isSaving) {
@@ -199,11 +384,18 @@ export const useResumeStore = defineStore('resume', () => {
         if (!result.ok) throw new Error(result.message || '云端保存失败');
       }
 
+      // 本次会话第一次保存成功才记一次：自动保存每 3 秒触发，
+      // 逐次上报等于把埋点表写满，而「有没有人成功保存过」这个问题的答案不会变
+      if (!trackedSaveOk) {
+        trackedSaveOk = true;
+        trackEvent('resume.save.ok');
+      }
       saveStatus.value = 'saved';
       const now = new Date();
       lastSavedTime.value = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
     } catch (err) {
       console.error(err);
+      trackEvent('resume.save.fail');
       saveStatus.value = 'error';
     } finally {
       isSaving = false;
@@ -223,99 +415,75 @@ export const useResumeStore = defineStore('resume', () => {
     triggerAutoSave();
   }
 
-  // 清空所有模块内容
+  // 清空所有模块内容（保留当前简历语言，英文简历清空后仍是英文骨架）
   function clearAllData() {
+    content.value = buildEmptyContent(content.value.locale);
+    triggerAutoSave();
+  }
+
+  /**
+   * 切换简历语言。
+   *
+   * 只改「仍是默认值」的模块标题与空字段占位，用户写的内容一字不动——
+   * 翻译用户自己写的经历是另一个产品（AI 改写），不该混进语言切换里。
+   */
+  function setLocale(next: ResumeLocale) {
+    if (content.value.locale === next) return;
     content.value = {
-      profile: {
-        name: '姓名',
-        title: '求职意向',
-        email: '',
-        phone: '',
-        showAvatar: false
-      },
-      modulesOrder: ['work', 'projects', 'skills', 'education', 'custom'],
-      modules: {
-        work: { visible: true, title: '工作经历', items: [] },
-        projects: { visible: true, title: '项目经历', items: [] },
-        skills: { visible: true, title: '专业技能', items: [] },
-        education: { visible: true, title: '教育背景', items: [] },
-        custom: { visible: false, title: '自定义模块', items: [] }
-      }
+      ...content.value,
+      locale: next,
+      modules: localizeModuleTitles(content.value.modules, next)
     };
     triggerAutoSave();
   }
 
-  // 智能卡页（Auto-Fit）算法：自动解算最佳间距与字号，完美将内容收敛至单页 A4
-  function autoFitOnePage(currentHeight?: number): { success: boolean; message: string } {
-    const targetHeight = A4_HEIGHT_PX;
-    // 测量内容节点而非纸张：纸张的 min-height: 297mm 会让测量值恒等于一页
-    let height = currentHeight;
-    if (!height) {
-      const doc = document.querySelector(`.a4-print-target ${RESUME_DOC_SELECTOR}`) as HTMLElement | null;
-      height = doc?.scrollHeight || targetHeight;
-    }
+  const locale = computed(() => normalizeLocale(content.value.locale));
 
-    // 黄金单页阈值容差 (±15px 内无需进一步调整)
-    if (Math.abs(height - targetHeight) <= 15) {
-      return {
-        success: true,
-        message: '当前经历正处于黄金单页排版比例，无需调整。'
-      };
-    }
+  /**
+   * 上一次自动排版前的主题快照。
+   *
+   * AutoFit 会连改多个参数，用户如果不满意，需要一个“撤销本次自动排版”的
+   * 出口——否则只能手动把五个滑块逐一调回去。
+   */
+  const autoFitSnapshot = ref<ThemeConfig | null>(null);
 
-    // 1. 内容溢出超页：自适应收紧
-    if (height > targetHeight) {
-      const overflowRatio = (height - targetHeight) / targetHeight;
-      if (overflowRatio > 0.45) {
-        return {
-          success: false,
-          message: '当前经历内容超出 1 页较多，建议精简经历或分为两页呈现'
-        };
-      }
+  /**
+   * 迭代式自动排版（RENDER-07）。
+   *
+   * 与旧实现的差别：
+   * - 每轮改一个参数 → 等渲染 → 重新测量 → 再判断，而不是一次性改一组；
+   * - 支持目标页数（1 页 / 2 页），不再只有“塞进一页”一种目标；
+   * - 操作前保存快照，可撤销；
+   * - 失败时给出超出高度，而不是只丢一句“建议精简”。
+   */
+  async function autoFitOnePage(targetPages = 1): Promise<{ success: boolean; message: string }> {
+    const result = await runAutoFit(
+      themeConfig.value,
+      (patch) => {
+        Object.assign(themeConfig.value, patch);
+      },
+      { targetPages }
+    );
 
-      if (overflowRatio > 0.25) {
-        themeConfig.value.fontSize = Math.max(12.5, themeConfig.value.fontSize - 1);
-        themeConfig.value.lineHeight = Math.max(1.35, Number((themeConfig.value.lineHeight - 0.1).toFixed(2)));
-        themeConfig.value.sectionSpacing = Math.max(10, themeConfig.value.sectionSpacing - 6);
-        themeConfig.value.paragraphSpacing = Math.max(3, themeConfig.value.paragraphSpacing - 3);
-        themeConfig.value.pagePadding = Math.max(14, themeConfig.value.pagePadding - 3);
-      } else if (overflowRatio > 0.1) {
-        themeConfig.value.fontSize = Math.max(13, themeConfig.value.fontSize - 0.5);
-        themeConfig.value.lineHeight = Math.max(1.4, Number((themeConfig.value.lineHeight - 0.05).toFixed(2)));
-        themeConfig.value.sectionSpacing = Math.max(12, themeConfig.value.sectionSpacing - 4);
-        themeConfig.value.paragraphSpacing = Math.max(4, themeConfig.value.paragraphSpacing - 2);
-        themeConfig.value.pagePadding = Math.max(16, themeConfig.value.pagePadding - 2);
-      } else {
-        // 轻微超页（溢出 <= 10%），收拢模块与段落间距即可消除跨页
-        themeConfig.value.sectionSpacing = Math.max(10, themeConfig.value.sectionSpacing - 4);
-        themeConfig.value.paragraphSpacing = Math.max(3, themeConfig.value.paragraphSpacing - 2);
-      }
+    if (result.snapshot) {
+      autoFitSnapshot.value = result.snapshot;
       triggerAutoSave();
-      return {
-        success: true,
-        message: '已智能压缩微调，成功收敛至标准单页！'
-      };
     }
 
-    // 2. 内容偏少（下半部留白）：自适应丰满排版
-    if (height < 940) {
-      themeConfig.value.fontSize = Math.min(15, themeConfig.value.fontSize + 0.5);
-      themeConfig.value.lineHeight = Math.min(1.65, Number((themeConfig.value.lineHeight + 0.05).toFixed(2)));
-      themeConfig.value.sectionSpacing = Math.min(24, themeConfig.value.sectionSpacing + 6);
-      themeConfig.value.paragraphSpacing = Math.min(10, themeConfig.value.paragraphSpacing + 3);
-      themeConfig.value.pagePadding = Math.min(24, themeConfig.value.pagePadding + 2);
-      triggerAutoSave();
-      return {
-        success: true,
-        message: '已自动丰满排版，单页视觉更充实！'
-      };
-    }
-
-    return {
-      success: true,
-      message: '当前经历正处于黄金单页排版比例，无需调整。'
-    };
+    return { success: result.success, message: result.message };
   }
+
+  /** 撤销最近一次自动排版；没有快照时返回 false */
+  function undoAutoFit(): boolean {
+    const snapshot = autoFitSnapshot.value;
+    if (!snapshot) return false;
+    themeConfig.value = JSON.parse(JSON.stringify(snapshot));
+    autoFitSnapshot.value = null;
+    triggerAutoSave();
+    return true;
+  }
+
+  const canUndoAutoFit = computed(() => autoFitSnapshot.value !== null);
 
   // 监听内容与样式变更，自动进入防抖倒计时
   watch([content, themeConfig, title, templateId], () => {
@@ -332,16 +500,25 @@ export const useResumeStore = defineStore('resume', () => {
     zoom,
     saveStatus,
     lastSavedTime,
+    isPublic,
+    hasUnsavedLocalDraft,
     isAutoSavePaused,
     suspendAutoSave,
     loadResumeData,
     loadLocalDraft,
+    listLocalDrafts,
+    migrateLegacyDrafts,
+    pruneLegacyBackups,
     persistLocalDraft,
     createLocalId,
     createLocalDraft,
     saveResume,
     resetToPreset,
     clearAllData,
-    autoFitOnePage
+    locale,
+    setLocale,
+    autoFitOnePage,
+    undoAutoFit,
+    canUndoAutoFit
   };
 });

@@ -2,7 +2,9 @@
 import { computed } from 'vue';
 import { useResumeStore } from '../../stores/resume';
 import { ProjectItem } from '../../types/resume';
-import { Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-vue-next';
+import { Plus, Trash2, ArrowUp, ArrowDown, Copy } from 'lucide-vue-next';
+import MonthPicker from '../../components/editor/MonthPicker.vue';
+import BulletEditor from '../../components/editor/BulletEditor.vue';
 
 const resumeStore = useResumeStore();
 const projectModule = computed(() => resumeStore.content.modules.projects);
@@ -15,7 +17,7 @@ const addProjectItem = () => {
     startDate: '',
     endDate: '至今',
     link: '',
-    description: '• 项目背景：...\n• 核心职责与贡献：...'
+    description: ''
   };
   projectModule.value.items.push(newItem);
 };
@@ -33,12 +35,14 @@ const moveProjectItem = (index: number, direction: 'up' | 'down') => {
   }
 };
 
-const insertSnippet = (item: ProjectItem, templateText: string) => {
-  if (!item.description || item.description.trim() === '') {
-    item.description = templateText;
-  } else {
-    item.description += `\n${templateText}`;
-  }
+/** 复制一个项目：同系列产品的多个版本常常只需改名称与指标 */
+const duplicateProjectItem = (index: number) => {
+  const source = projectModule.value.items[index];
+  const copy: ProjectItem = {
+    ...JSON.parse(JSON.stringify(source)),
+    id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  };
+  projectModule.value.items.splice(index + 1, 0, copy);
 };
 </script>
 
@@ -68,9 +72,18 @@ const insertSnippet = (item: ProjectItem, templateText: string) => {
           <ArrowDown class="w-3.5 h-3.5" />
         </button>
         <button
+          @click="duplicateProjectItem(idx)"
+          title="复制此项目"
+          aria-label="复制此项目"
+          class="text-slate-500 hover:text-slate-800 transition p-1 rounded"
+        >
+          <Copy class="w-3.5 h-3.5" />
+        </button>
+        <button
           @click="removeProjectItem(idx)"
           title="删除此项目"
-          class="text-slate-400 hover:text-rose-500 transition p-1 rounded ml-1"
+          aria-label="删除此项目"
+          class="text-slate-500 hover:text-danger-600 transition p-1 rounded ml-1"
         >
           <Trash2 class="w-3.5 h-3.5" />
         </button>
@@ -108,54 +121,14 @@ const insertSnippet = (item: ProjectItem, templateText: string) => {
         </div>
 
         <div class="grid grid-cols-2 gap-1.5">
-          <div>
-            <label class="block text-2xs font-medium text-slate-500 mb-0.5">开始时间</label>
-            <input
-              type="text"
-              v-model="item.startDate"
-              placeholder="2023.01"
-              class="w-full px-2 py-1 text-xs bg-white border border-slate-200 rounded focus:border-primary-500 outline-none"
-            />
-          </div>
-          <div>
-            <label class="block text-2xs font-medium text-slate-500 mb-0.5">结束时间</label>
-            <input
-              type="text"
-              v-model="item.endDate"
-              placeholder="2023.10"
-              class="w-full px-2 py-1 text-xs bg-white border border-slate-200 rounded focus:border-primary-500 outline-none"
-            />
-          </div>
+          <MonthPicker v-model="item.startDate" label="开始时间" />
+          <MonthPicker v-model="item.endDate" label="结束时间" allow-present />
         </div>
       </div>
 
       <div>
         <label class="block text-2xs font-medium text-slate-600 mb-1">项目描述与个人贡献</label>
-        <textarea
-          v-model="item.description"
-          rows="3"
-          placeholder="介绍项目定位、采用的技术方案及攻坚的技术难点与收益..."
-          class="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded focus:border-primary-500 outline-none font-sans leading-relaxed"
-        ></textarea>
-
-        <!-- 快捷项目句式推荐 -->
-        <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
-          <span class="text-2xs text-slate-400">快捷句式:</span>
-          <button
-            type="button"
-            @click="insertSnippet(item, '• 项目难点：面对 [高并发/复杂交互/海量数据] 挑战，设计并落地 [架构方案]。')"
-            class="text-2xs text-primary-600 bg-primary-50 hover:bg-primary-100 border border-primary-200/60 px-1.5 py-0.5 rounded transition"
-          >
-            + 架构难点攻关
-          </button>
-          <button
-            type="button"
-            @click="insertSnippet(item, '• 核心收益：项目上线后支撑 [XX] 业务场景，交付周期缩短 [40%]，好评率达 [98%]。')"
-            class="text-2xs text-primary-600 bg-primary-50 hover:bg-primary-100 border border-primary-200/60 px-1.5 py-0.5 rounded transition"
-          >
-            + 量化业务收益
-          </button>
-        </div>
+        <BulletEditor v-model="item.description" placeholder="一条一条写：项目难点、你的方案、带来的收益（带数字）" />
       </div>
     </div>
 

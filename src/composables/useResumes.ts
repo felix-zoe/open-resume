@@ -6,8 +6,17 @@ import { askConfirm } from './useConfirm';
 
 export interface ResumeStats {
   totalViews: number;
+  /** 按访客指纹去重后的独立访客数 */
+  uniqueVisitors: number;
   avgDuration: number;
   totalDownloads: number;
+}
+
+export interface ResumeCompleteness {
+  /** 0–100，由服务端按「招聘方必看信息」加权算出，不判断内容质量 */
+  score: number;
+  /** 未通过的检查项 key，前端映射成中文提示 */
+  missing: string[];
 }
 
 export interface ResumeSummary {
@@ -17,17 +26,24 @@ export interface ResumeSummary {
   isPublic?: number;
   createdAt?: string | number;
   updatedAt: string | number;
+  completeness?: ResumeCompleteness;
   stats: ResumeStats;
 }
 
 export interface OverviewRow {
   resumeId: string;
   totalViews: number;
+  uniqueVisitors?: number;
   avgDuration: number;
   totalDownloads: number;
 }
 
-const EMPTY_STATS: ResumeStats = { totalViews: 0, avgDuration: 0, totalDownloads: 0 };
+const EMPTY_STATS: ResumeStats = {
+  totalViews: 0,
+  uniqueVisitors: 0,
+  avgDuration: 0,
+  totalDownloads: 0
+};
 
 function normalizeList(raw: unknown): Array<Omit<ResumeSummary, 'stats'>> {
   if (!Array.isArray(raw)) return [];
@@ -37,6 +53,18 @@ function normalizeList(raw: unknown): Array<Omit<ResumeSummary, 'stats'>> {
   );
 }
 
+/** 完整度缺失或结构异常时不显示进度条，而不是显示一个假的 0% */
+function normalizeCompleteness(raw: unknown): ResumeCompleteness | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const value = raw as { score?: unknown; missing?: unknown };
+  const score = Number(value.score);
+  if (!Number.isFinite(score)) return undefined;
+  return {
+    score: Math.max(0, Math.min(100, Math.round(score))),
+    missing: Array.isArray(value.missing) ? value.missing.filter((k) => typeof k === 'string') : []
+  };
+}
+
 function normalizeOverview(raw: unknown): Map<string, ResumeStats> {
   const map = new Map<string, ResumeStats>();
   if (!Array.isArray(raw)) return map;
@@ -44,6 +72,7 @@ function normalizeOverview(raw: unknown): Map<string, ResumeStats> {
     if (!row || typeof row.resumeId !== 'string') continue;
     map.set(row.resumeId, {
       totalViews: Number(row.totalViews) || 0,
+      uniqueVisitors: Number(row.uniqueVisitors) || 0,
       avgDuration: Math.round(Number(row.avgDuration) || 0),
       totalDownloads: Number(row.totalDownloads) || 0
     });
@@ -86,6 +115,7 @@ export function useResumes() {
 
       resumes.value = normalizeList(listResult.data).map((item) => ({
         ...item,
+        completeness: normalizeCompleteness(item.completeness),
         stats: overview.get(item.id) ?? { ...EMPTY_STATS }
       }));
       loaded.value = true;

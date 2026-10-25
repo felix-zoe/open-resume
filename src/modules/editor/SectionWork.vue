@@ -2,7 +2,9 @@
 import { computed } from 'vue';
 import { useResumeStore } from '../../stores/resume';
 import { WorkItem } from '../../types/resume';
-import { Plus, Trash2, HelpCircle, ArrowUp, ArrowDown } from 'lucide-vue-next';
+import { Plus, Trash2, HelpCircle, ArrowUp, ArrowDown, Copy } from 'lucide-vue-next';
+import MonthPicker from '../../components/editor/MonthPicker.vue';
+import BulletEditor from '../../components/editor/BulletEditor.vue';
 
 const resumeStore = useResumeStore();
 const workModule = computed(() => resumeStore.content.modules.work);
@@ -15,7 +17,9 @@ const addWorkItem = () => {
     position: '',
     startDate: '',
     endDate: '至今',
-    description: '• 负责...\n• 达成...'
+    // 不再预填「负责...」这类占位句式：用户往往直接提交，
+    // 结果简历上留着一句没改的空话
+    description: ''
   };
   workModule.value.items.push(newItem);
 };
@@ -33,12 +37,14 @@ const moveWorkItem = (index: number, direction: 'up' | 'down') => {
   }
 };
 
-const insertSnippet = (item: WorkItem, templateText: string) => {
-  if (!item.description || item.description.trim() === '') {
-    item.description = templateText;
-  } else {
-    item.description += `\n${templateText}`;
-  }
+/** 复制一条经历：常见于同公司内换岗，逐字段重填太浪费 */
+const duplicateWorkItem = (index: number) => {
+  const source = workModule.value.items[index];
+  const copy: WorkItem = {
+    ...JSON.parse(JSON.stringify(source)),
+    id: `work-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  };
+  workModule.value.items.splice(index + 1, 0, copy);
 };
 </script>
 
@@ -56,7 +62,8 @@ const insertSnippet = (item: WorkItem, templateText: string) => {
           v-if="idx > 0"
           @click="moveWorkItem(idx, 'up')"
           title="上移此段经历"
-          class="text-slate-400 hover:text-slate-700 transition p-1 rounded"
+          aria-label="上移此段经历"
+          class="text-slate-500 hover:text-slate-800 transition p-1 rounded"
         >
           <ArrowUp class="w-3.5 h-3.5" />
         </button>
@@ -64,14 +71,24 @@ const insertSnippet = (item: WorkItem, templateText: string) => {
           v-if="idx < workModule.items.length - 1"
           @click="moveWorkItem(idx, 'down')"
           title="下移此段经历"
-          class="text-slate-400 hover:text-slate-700 transition p-1 rounded"
+          aria-label="下移此段经历"
+          class="text-slate-500 hover:text-slate-800 transition p-1 rounded"
         >
           <ArrowDown class="w-3.5 h-3.5" />
         </button>
         <button
+          @click="duplicateWorkItem(idx)"
+          title="复制此段经历"
+          aria-label="复制此段经历"
+          class="text-slate-500 hover:text-slate-800 transition p-1 rounded"
+        >
+          <Copy class="w-3.5 h-3.5" />
+        </button>
+        <button
           @click="removeWorkItem(idx)"
           title="删除此段经历"
-          class="text-slate-400 hover:text-rose-500 transition p-1 rounded ml-1"
+          aria-label="删除此段经历"
+          class="text-slate-500 hover:text-danger-600 transition p-1 rounded ml-1"
         >
           <Trash2 class="w-3.5 h-3.5" />
         </button>
@@ -109,24 +126,8 @@ const insertSnippet = (item: WorkItem, templateText: string) => {
         </div>
 
         <div class="grid grid-cols-2 gap-1.5">
-          <div>
-            <label class="block text-2xs font-medium text-slate-500 mb-0.5">开始时间</label>
-            <input
-              type="text"
-              v-model="item.startDate"
-              placeholder="2022.07"
-              class="w-full px-2 py-1 text-xs bg-white border border-slate-200 rounded focus:border-primary-500 outline-none"
-            />
-          </div>
-          <div>
-            <label class="block text-2xs font-medium text-slate-500 mb-0.5">结束时间</label>
-            <input
-              type="text"
-              v-model="item.endDate"
-              placeholder="至今 / 2024.03"
-              class="w-full px-2 py-1 text-xs bg-white border border-slate-200 rounded focus:border-primary-500 outline-none"
-            />
-          </div>
+          <MonthPicker v-model="item.startDate" label="开始时间" />
+          <MonthPicker v-model="item.endDate" label="结束时间" allow-present />
         </div>
       </div>
 
@@ -140,38 +141,7 @@ const insertSnippet = (item: WorkItem, templateText: string) => {
             <HelpCircle class="w-3 h-3" /> 建议采用 STAR 法则，分点量化描述
           </span>
         </div>
-        <textarea
-          v-model="item.description"
-          rows="3"
-          placeholder="• 负责...，主导使用某技术解决某问题；&#10;• 达成...量化结果（如性能提升30%，服务亿级PV）。"
-          class="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded focus:border-primary-500 outline-none font-sans leading-relaxed"
-        ></textarea>
-
-        <!-- 快捷 STAR 句式推荐 -->
-        <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
-          <span class="text-2xs text-slate-400">快捷句式:</span>
-          <button
-            type="button"
-            @click="insertSnippet(item, '• 主导负责 [核心模块/系统]，攻关解决 [技术难点]，推动业务效率提升 [30%]。')"
-            class="text-2xs text-primary-600 bg-primary-50 hover:bg-primary-100 border border-primary-200/60 px-1.5 py-0.5 rounded transition"
-          >
-            + 主导推进与提效
-          </button>
-          <button
-            type="button"
-            @click="insertSnippet(item, '• 深度调优 [首屏加载/渲染性能]，核心交互卡顿率降低 [50%]，服务日常 [XX 万] 用户。')"
-            class="text-2xs text-primary-600 bg-primary-50 hover:bg-primary-100 border border-primary-200/60 px-1.5 py-0.5 rounded transition"
-          >
-            + 性能调优指标
-          </button>
-          <button
-            type="button"
-            @click="insertSnippet(item, '• 搭建跨团队 [通用组件库/规范底座]，支撑 [10+] 个核心业务线稳定平滑交付。')"
-            class="text-2xs text-teal-600 bg-teal-50 hover:bg-teal-100 border border-teal-200/60 px-1.5 py-0.5 rounded transition"
-          >
-            + 规范底座支撑
-          </button>
-        </div>
+        <BulletEditor v-model="item.description" />
       </div>
     </div>
 
