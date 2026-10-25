@@ -29,7 +29,11 @@ const RULES = {
   noNativeDialogs: true,       // T1.5
   noGrayTokens: true,          // T1.2
   noSmallFonts: true,          // T1.2b
-  brandSolidInUiOnly: true     // T1.12
+  brandSolidInUiOnly: true,    // T1.12
+  noLegacyTailwindTokens: true, // M4 令牌收口
+  noThirdPartyTracking: true,  // T5.6 隐私政策承诺
+  noExternalRequest: true,     // T5.7 AI 请求必须经 /api 转发
+  aiBaseUrlSource: true        // T5.7 厂商地址只允许出现在 shared/ai.ts
 };
 
 function walk(dir, out = []) {
@@ -184,10 +188,125 @@ if (RULES.brandSolidInUiOnly) {
 }
 
 // ---------------------------------------------------------------------------
+// 规则 8：禁止 Tailwind v3.4 不存在的刻度（M4 起）
+//   这些类名曾靠 tailwind.config.js 补丁生效，但方案 1.3.3 要求归零：
+//   补丁让「不存在的类」看起来能用，下一个人复制到别的项目就会静默失效。
+// ---------------------------------------------------------------------------
+if (RULES.noLegacyTailwindTokens) {
+  const LEGACY = [
+    { pattern: /\bshadow-2xs\b/, detail: 'shadow-2xs → shadow-xs' },
+    { pattern: /\brounded-xs\b/, detail: 'rounded-xs → rounded-sm' },
+    { pattern: /\bbackdrop-blur-2xs\b/, detail: 'backdrop-blur-2xs → backdrop-blur-sm' },
+    { pattern: /\b(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|space-[xy])-4\.5\b/, detail: '4.5 间距 → 任意值写法如 w-[18px]' }
+  ];
+  scanLines(sourceFiles, 'no-legacy-tailwind-tokens', (line) => {
+    const hit = LEGACY.find((rule) => rule.pattern.test(line));
+    return hit ? hit.detail : null;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 规则 9：禁止第三方追踪（T5.6 起）
+//   隐私政策写了「不接入第三方统计、广告或用户画像服务，页面中没有第三方追踪脚本」，
+//   而这句话一旦被一次「先接个 Sentry 再说」的提交推翻，用户看到的就是假话。
+//   自建埋点走 /api/telemetry，不需要任何外部 SDK。
+// ---------------------------------------------------------------------------
+if (RULES.noThirdPartyTracking) {
+  const TRACKERS = [
+    { pattern: /sentry\.io|@sentry\//, detail: '不接入 Sentry，错误上报走自建 /api/telemetry' },
+    { pattern: /googletagmanager|google-analytics|gtag\(/, detail: '不接入 Google Analytics' },
+    { pattern: /hm\.baidu\.com|cnzz\.com|umeng\.com/, detail: '不接入百度统计 / 友盟等第三方统计' },
+    { pattern: /plausible\.io|posthog\.com|mixpanel\.com|amplitude\.com/, detail: '不接入第三方产品分析服务' },
+    { pattern: /fbq\(|facebook\.net\/.*fbevents/, detail: '不接入广告像素' }
+  ];
+
+  // 依赖清单也要查：装进 package.json 就等于「下次有人 import 一下就能用」
+  const manifests = [path.join(ROOT, 'package.json')];
+  for (const manifest of manifests) {
+    if (!fs.existsSync(manifest)) continue;
+    const text = read(manifest);
+    for (const rule of TRACKERS) {
+      if (rule.pattern.test(text)) addViolation('no-third-party-tracking', manifest, 0, rule.detail);
+    }
+  }
+
+  scanLines(sourceFiles, 'no-third-party-tracking', (line) => {
+    // 注释里提到这些名字是允许的（比如解释「为什么不用」），只拦真正的调用
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return null;
+    const hit = TRACKERS.find((rule) => rule.pattern.test(line));
+    return hit ? hit.detail : null;
+  });
+
+  // index.html 里的第三方脚本标签
+  const indexHtml = path.join(ROOT, 'index.html');
+  if (fs.existsSync(indexHtml)) {
+    const text = read(indexHtml);
+    const externalScript = /<script[^>]+src=["']https?:\/\/(?!fonts\.)[^"']+/i.exec(text);
+    if (externalScript) {
+      addViolation(
+        'no-third-party-tracking',
+        indexHtml,
+        1,
+        `index.html 引用了外域脚本：${externalScript[0].slice(0, 80)}`
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 规则 10：前端不得直连外域（T5.7 起）
+//   AI 改写用的是用户自己的 API Key，一旦有代码在浏览器里直连厂商，
+//   Key 就必须出现在页面的请求里，CSP 也得为它开外域白名单 ——
+//   而「页面不会把你的内容发到第三方」正是靠 `connect-src 'self'` 兜住的。
+//   所有外部服务一律经本站 /api 转发，这条规则负责把口子焊死。
+// ---------------------------------------------------------------------------
+if (RULES.noExternalRequest) {
+  scanLines(sourceFiles, 'no-external-request', (line) => {
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return null;
+    if (/\b(?:fetch|sendBeacon)\s*\(\s*['"`]https?:\/\//.test(line)) {
+      return '前端不得直接请求外域，请改走本站 /api 转发';
+    }
+    if (/new\s+WebSocket\s*\(\s*['"`]wss?:\/\//.test(line)) {
+      return '前端不得直连外部 WebSocket';
+    }
+    return null;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 规则 11：厂商接口地址只能写在 shared/ai.ts（T5.7 起）
+//   服务端只信任 `shared/ai.ts` 里登记过的预设地址（自定义厂商另走 SSRF 校验）。
+//   如果某个组件自己硬编码一个厂商域名，那条地址就绕过了白名单，
+//   而且它还会随前端包一起发出去 —— 地址表只该有一份，且只在共享层。
+// ---------------------------------------------------------------------------
+if (RULES.aiBaseUrlSource) {
+  const VENDOR_HOSTS = [
+    /api\.deepseek\.com/,
+    /dashscope\.aliyuncs\.com/,
+    /open\.bigmodel\.cn/,
+    /api\.moonshot\.cn/,
+    /ark\.cn-beijing\.volces\.com/,
+    /qianfan\.baidubce\.com/,
+    /api\.hunyuan\.cloud\.tencent\.com/,
+    /spark-api-open\.xf-yun\.com/,
+    /api\.siliconflow\.cn/,
+    /api\.minimax\.chat/,
+    /api\.stepfun\.com/,
+    /api\.baichuan-ai\.com/
+  ];
+  scanLines(sourceFiles, 'ai-base-url-source', (line) => {
+    const hit = VENDOR_HOSTS.find((pattern) => pattern.test(line));
+    return hit ? '模型厂商接口地址只允许写在 shared/ai.ts，组件里请用 findAiProvider()' : null;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // 规则 6：静态资源与 SPA 回退（T0.12 起）
 // ---------------------------------------------------------------------------
 const faviconPath = path.join(ROOT, 'public', 'favicon.svg');
 const redirectsPath = path.join(ROOT, 'public', '_redirects');
+const robotsPath = path.join(ROOT, 'public', 'robots.txt');
+const sitemapPath = path.join(ROOT, 'public', 'sitemap.xml');
 
 if (!fs.existsSync(faviconPath)) {
   addViolation('static-assets', faviconPath, 0, '缺少 public/favicon.svg');
@@ -196,6 +315,43 @@ if (!fs.existsSync(redirectsPath)) {
   addViolation('static-assets', redirectsPath, 0, '缺少 public/_redirects');
 } else if (!/^\s*\/\*\s+\/index\.html\s+200\s*$/m.test(read(redirectsPath))) {
   addViolation('static-assets', redirectsPath, 1, '缺少 SPA 回退规则 /* /index.html 200');
+}
+if (!fs.existsSync(robotsPath)) {
+  addViolation('static-assets', robotsPath, 0, '缺少 public/robots.txt');
+}
+if (!fs.existsSync(sitemapPath)) {
+  addViolation('static-assets', sitemapPath, 0, '缺少 public/sitemap.xml');
+}
+
+// ---------------------------------------------------------------------------
+// 规则 10：PWA 图标（T5.4 起）
+//   manifest 里引用了不存在的图标，Chrome 会直接判定「不可安装」，
+//   而这件事在浏览器里没有任何可见报错 —— 只能靠守卫。
+// ---------------------------------------------------------------------------
+for (const icon of ['pwa-192x192.png', 'pwa-512x512.png', 'apple-touch-icon.png']) {
+  const iconPath = path.join(ROOT, 'public', icon);
+  if (!fs.existsSync(iconPath)) {
+    addViolation('pwa-icons', iconPath, 0, `缺少 PWA 图标 public/${icon}（可用 npm run icons 生成）`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 规则 9：sitemap 与示例数据一致（T5.3 起）
+//   sitemap 是静态文件，示例是 TS 数据源。新增示例却忘了补 sitemap，
+//   那个页面就永远不会被发现 —— 这类「静默失效」只能靠守卫兜住。
+// ---------------------------------------------------------------------------
+const examplesSource = path.join(SRC, 'constants', 'examples.data.json');
+if (fs.existsSync(sitemapPath) && fs.existsSync(examplesSource)) {
+  const slugs = JSON.parse(read(examplesSource)).examples.map((item) => item.slug);
+  const sitemap = read(sitemapPath);
+  for (const slug of slugs) {
+    if (!sitemap.includes(`/examples/${slug}<`)) {
+      addViolation('sitemap-examples', sitemapPath, 0, `示例 /examples/${slug} 未收录进 sitemap.xml`);
+    }
+  }
+  if (!sitemap.includes('/examples<')) {
+    addViolation('sitemap-examples', sitemapPath, 0, 'sitemap.xml 缺少示例库列表页 /examples');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -211,7 +367,8 @@ if (fs.existsSync(distAssets)) {
     addViolation('build-output', distAssets, 0, '构建产物中没有 CSS');
   } else {
     const css = cssFiles.map((f) => read(path.join(distAssets, f))).join('\n');
-    for (const token of ['.shadow-2xs', '.shadow-xs']) {
+    // 只校验基础档位：其余档位可能仅在 hover: 变体中出现，类名会被转义
+    for (const token of ['.shadow-xs']) {
       if (!css.includes(token)) {
         addViolation('build-output', path.join(distAssets, cssFiles[0]), 0, `构建 CSS 缺少 ${token} 规则`);
       }
