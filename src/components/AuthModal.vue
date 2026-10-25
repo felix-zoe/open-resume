@@ -41,9 +41,8 @@ watch(
 );
 
 const handleSuccess = (payload: { migrated: boolean }) => {
-  toast.success(
-    payload.migrated ? '账号已就绪，本地草稿已同步至云端' : '账号已就绪，草稿仍安全保存在本机'
-  );
+  if (payload.migrated) toast.success('账号已就绪，本地草稿已同步至云端');
+  else toast.success('登录成功，草稿仍安全保存在本机');
   emit('success');
   emit('close');
 };
@@ -69,6 +68,11 @@ const handleSuccess = (payload: { migrated: boolean }) => {
       @update:model-value="mode = $event as AuthMode"
     />
 
-    <AuthForm :mode="mode" dense @success="handleSuccess" />
+    <AuthForm
+      :mode="mode"
+      dense
+      @success="handleSuccess"
+      @draft-choice-pending="emit('close')"
+    />
   </AppModal>
 </template>

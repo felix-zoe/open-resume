@@ -34,9 +34,8 @@ const switchMode = (next: string) => {
 };
 
 const handleSuccess = (payload: { migrated: boolean }) => {
-  toast.success(
-    payload.migrated ? '登录成功，本地草稿已同步至云端' : '账号已就绪，草稿仍安全保存在本机'
-  );
+  if (payload.migrated) toast.success('登录成功，本地草稿已同步至云端');
+  else toast.success('登录成功，草稿仍安全保存在本机');
   router.push(redirectTarget.value);
 };
 
@@ -73,7 +72,7 @@ onMounted(() => {
           都配得上你的专业与付出
         </h2>
 
-        <p class="text-sm text-slate-400 leading-relaxed">
+        <p class="text-sm text-slate-300 leading-relaxed">
           真实 A4 排版、一键压缩到一页、在线只读分享。简历保存在你自己的云端空间，随时导出 PDF。
         </p>
 
@@ -134,8 +133,11 @@ onMounted(() => {
         <AuthForm :mode="mode" @success="handleSuccess" />
       </div>
 
-      <p class="text-center text-2xs text-slate-500">
-        登录或注册即代表您同意 OpenResume 开源服务协议与隐私声明
+      <p class="text-center text-2xs text-slate-500 leading-relaxed">
+        <span>{{ isLogin ? '登录即代表您同意 OpenResume' : '注册前请阅读' }}</span>
+        <router-link to="/terms" class="font-semibold text-slate-600 hover:text-primary-600 underline underline-offset-2">服务条款</router-link>
+        <span>与</span>
+        <router-link to="/privacy" class="font-semibold text-slate-600 hover:text-primary-600 underline underline-offset-2">隐私政策</router-link>
       </p>
     </main>
   </div>

@@ -1,15 +1,22 @@
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { useResumeStore } from '../stores/resume';
 import { apiFetch } from '../utils/http';
+import { askChoice } from './useChoice';
+import { trackEvent } from '../utils/telemetry';
 
 export type AuthMode = 'login' | 'register';
+
+/** 登录后对本地草稿的处理方式：同步到云端，或继续只留在本机 */
+export type DraftChoice = 'sync' | 'keep-local';
 
 interface SubmitResult {
   ok: boolean;
   /** 登录/注册本身成功，但本地草稿迁移到云端失败 */
   migrated: boolean;
+  /** 用户对本地草稿的选择；没有草稿时为 undefined */
+  draftChoice?: DraftChoice;
   error?: string;
 }
 
@@ -20,7 +27,15 @@ interface SubmitResult {
  * 1. 迁移成功后只改 store.id 不改 URL，刷新就回到旧草稿；
  * 2. 迁移后旧草稿 key 仍留在 localStorage，下次再进 `/editor/demo` 会覆盖云端内容。
  */
-export function useAuthForm(options: { mode: () => AuthMode; onSuccess?: (result: SubmitResult) => void }) {
+export function useAuthForm(options: {
+  mode: () => AuthMode;
+  onSuccess?: (result: SubmitResult) => void;
+  /**
+   * 即将弹出「草稿是否同步」选择框。
+   * 宿主是弹窗时需要先把自己关掉，否则两个弹窗会叠在一起、下面的按钮点不到。
+   */
+  onDraftChoicePending?: () => void;
+}) {
   const router = useRouter();
   const route = useRoute();
   const authStore = useAuthStore();
@@ -61,9 +76,44 @@ export function useAuthForm(options: { mode: () => AuthMode; onSuccess?: (result
     return null;
   }
 
+  /**
+   * 登录成功后问用户：这份还没上云的草稿，是同步到云端还是只留在本机。
+   *
+   * 之前的实现是静默自动迁移：用户可能只是想在另一台设备上登录看看，
+   * 结果本机草稿凭空变成了一份云端简历。弹窗把选择权交回去，
+   * 关掉弹窗（返回 null）按「不改动」处理，也就是仅保留本地。
+   */
+  async function askDraftChoice(): Promise<DraftChoice> {
+    if (!resumeStore.hasUnsavedLocalDraft) return 'keep-local';
+
+    options.onDraftChoicePending?.();
+    // 让宿主弹窗先完成关闭动画，再挂上选择框
+    await nextTick();
+
+    const choice = await askChoice({
+      title: '这份本地草稿要同步到云端吗？',
+      description:
+        '你刚才编辑的简历目前只存在这台设备上。同步后可以在任何设备继续编辑，也能生成在线链接。',
+      options: [
+        {
+          value: 'sync',
+          label: '同步到云端',
+          description: '在当前账号下新建一份简历，之后自动保存',
+          tone: 'primary'
+        },
+        {
+          value: 'keep-local',
+          label: '仅保留本地',
+          description: '不上传，草稿继续留在这台设备；清空浏览器数据会丢失'
+        }
+      ]
+    });
+    return choice === 'sync' ? 'sync' : 'keep-local';
+  }
+
   /** 把当前本地草稿迁移成云端简历，成功后同步 URL */
   async function migrateLocalDraft(token: string): Promise<{ migrated: boolean; newId?: string }> {
-    if (!resumeStore.isLocalDraft) return { migrated: true };
+    if (!resumeStore.hasUnsavedLocalDraft) return { migrated: true };
 
     try {
       const result = await apiFetch<{ id: string }>('/api/resumes', {
@@ -134,14 +184,20 @@ export function useAuthForm(options: { mode: () => AuthMode; onSuccess?: (result
 
       authStore.setAuth(result.data.token, result.data.user);
 
-      const { migrated, newId } = await migrateLocalDraft(result.data.token);
+      // 先问再迁：静默迁移会让用户莫名其妙多出一份云端简历
+      const draftChoice = await askDraftChoice();
+      const { migrated, newId } =
+        draftChoice === 'sync'
+          ? await migrateLocalDraft(result.data.token)
+          : { migrated: false, newId: undefined };
 
       // 迁移成功且用户正在编辑器里：URL 必须同步，否则刷新会回到旧草稿
       if (migrated && newId && route.name === 'Editor') {
         await router.replace({ name: 'Editor', params: { id: newId } });
       }
 
-      const submitResult: SubmitResult = { ok: true, migrated };
+      trackEvent(isLogin ? 'auth.login.ok' : 'auth.register.ok');
+      const submitResult: SubmitResult = { ok: true, migrated, draftChoice };
       options.onSuccess?.(submitResult);
       return submitResult;
     } catch (err: any) {
