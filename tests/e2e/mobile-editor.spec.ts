@@ -66,7 +66,12 @@ test.describe('编辑器响应式与缩放 @s1', () => {
     await page.goto('/editor/demo');
 
     // 移动端导出按钮只保留图标，用 aria-label 定位
-    await page.getByRole('button', { name: '导出 PDF' }).click();
+    await page.getByRole('button', { name: '导出简历' }).click();
+
+    // 格式弹窗在移动端同样可用，PDF 需再点「打开打印」
+    const dialog = page.getByRole('dialog', { name: '导出简历' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: '打开打印' }).click();
 
     await expect.poll(() => page.evaluate(() => (window as any).__printed)).toBe(1);
   });
@@ -117,6 +122,43 @@ test.describe('编辑器响应式与缩放 @s1', () => {
     expect(box!.x + box!.width).toBeLessThanOrEqual(wrapperBox!.x + wrapperBox!.width + 1);
   });
 
+  test('移动端「排版样式」Tab 内联可调字号 @s1', async ({ page }) => {
+    await page.setViewportSize(MOBILE);
+    await page.goto('/editor/demo');
+
+    await page.getByRole('tab', { name: '排版样式' }).click();
+    const panel = page.getByRole('complementary', { name: '排版样式' });
+    await expect(panel).toBeVisible();
+
+    // 表单与预览都不在样式 Tab 里
+    await expect(page.getByPlaceholder('如：张小凡')).toBeHidden();
+    await expect(page.locator('.a4-print-target')).toBeHidden();
+
+    // 调字号：值直接反映到 store 与滑块标签
+    const slider = panel.getByLabel('正文字号');
+    await slider.fill('15');
+    await expect(panel.getByText('15px')).toBeVisible();
+
+    // 切回预览，纸张仍在且未被样式面板挤走
+    await page.getByRole('tab', { name: '预览排版' }).click();
+    await expect(page.locator('.a4-print-target')).toBeVisible();
+  });
+
+  test('移动端底部固定导出条可打开格式弹窗 @s1', async ({ page }) => {
+    await page.setViewportSize(MOBILE);
+    await page.goto('/editor/demo');
+
+    // 底部条在主区域内始终可见，不随 Tab 切换消失
+    const bar = page.locator('main ~ div').filter({ hasText: '内容自动保存' });
+    await expect(bar).toBeVisible();
+
+    await page.getByRole('tab', { name: '预览排版' }).click();
+    await expect(bar).toBeVisible();
+
+    await bar.getByRole('button', { name: '导出' }).click();
+    await expect(page.getByRole('dialog', { name: '导出简历' })).toBeVisible();
+  });
+
   test('桌面端不显示移动 Tab @s1', async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await page.goto('/editor/demo');
@@ -124,5 +166,7 @@ test.describe('编辑器响应式与缩放 @s1', () => {
     await expect(page.getByRole('tab', { name: '填写内容' })).toHaveCount(0);
     await expect(page.getByPlaceholder('如：张小凡')).toBeVisible();
     await expect(page.locator('.a4-print-target')).toBeVisible();
+    // 桌面端底部导出条不存在，导出只在 Header 里
+    await expect(page.getByText('内容自动保存 · 导出后可直接投递')).toHaveCount(0);
   });
 });

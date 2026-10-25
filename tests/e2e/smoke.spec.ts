@@ -6,7 +6,8 @@ test.describe('smoke @s0', () => {
 
     await page.goto('/');
 
-    await expect(page.getByRole('navigation')).toContainText('OpenResume');
+    // 页面里有两个 nav（顶部导航与页脚法律链接），这里只验证顶部导航
+    await expect(page.getByRole('navigation').first()).toContainText('OpenResume');
     await expect(page.locator('h1').first()).toBeVisible();
     expect(errors).toEqual([]);
   });

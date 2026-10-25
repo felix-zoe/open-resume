@@ -22,7 +22,11 @@ test.describe('PDF 导出 @s0', () => {
     await page.waitForURL(/\/editor\/local_/);
     await expect(page.locator('.resume-doc')).toBeVisible();
 
-    await page.getByRole('button', { name: /导出 PDF/ }).click();
+    // 导出入口先打开格式弹窗，PDF 打印在弹窗里点「打开打印」触发
+    await page.getByRole('button', { name: '导出简历' }).click();
+    const dialog = page.getByRole('dialog', { name: '导出简历' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: '打开打印' }).click();
 
     await expect.poll(() => printCalls(page)).toBe(1);
 
