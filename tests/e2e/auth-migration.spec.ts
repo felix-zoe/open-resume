@@ -1,12 +1,17 @@
 import { test, expect } from './fixtures/mockApi';
 
-/** 在编辑器里登录：打开“同步云端”弹窗 */
+/** 在编辑器里登录：打开「同步云端」弹窗，并在迁移选择框里确认同步 */
 async function loginFromEditor(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: /同步云端/ }).click();
   await expect(page.getByRole('heading', { name: /欢迎回到 OpenResume/ })).toBeVisible();
   await page.getByPlaceholder('name@example.com').fill('test@example.com');
   await page.getByPlaceholder('至少 6 位字符').fill('secret123');
   await page.getByRole('button', { name: '立即登录' }).click();
+
+  // 登录后先问「同步到云端 / 仅保留本地」，选同步才迁移
+  const choice = page.getByRole('dialog', { name: '这份本地草稿要同步到云端吗？' });
+  await expect(choice).toBeVisible();
+  await choice.getByRole('button', { name: /同步到云端/ }).click();
 }
 
 test.describe('登录迁移 @s0', () => {
@@ -57,6 +62,39 @@ test.describe('登录迁移 @s0', () => {
     await expect(nameInput).toHaveValue('示例草稿名字');
   });
 
+  test('选择「仅保留本地」时不上传，草稿仍在浏览器里 @s0', async ({ page, mockApi }) => {
+    await page.goto('/editor/new');
+    await page.waitForURL(/\/editor\/local_/);
+    const localUrl = page.url();
+    await page.getByPlaceholder('如：张小凡').fill('只留本地的草稿');
+
+    await page.getByRole('button', { name: /同步云端/ }).click();
+    await page.getByPlaceholder('name@example.com').fill('test@example.com');
+    await page.getByPlaceholder('至少 6 位字符').fill('secret123');
+    await page.getByRole('button', { name: '立即登录' }).click();
+
+    const choice = page.getByRole('dialog', { name: '这份本地草稿要同步到云端吗？' });
+    await expect(choice).toBeVisible();
+    await choice.getByRole('button', { name: /仅保留本地/ }).click();
+
+    // 没有创建任何云端简历，URL 仍是本地草稿
+    await expect.poll(() => mockApi.count('POST', '/api/resumes')).toBe(0);
+    expect(page.url()).toBe(localUrl);
+    await expect(page.getByPlaceholder('如：张小凡')).toHaveValue('只留本地的草稿');
+  });
+
+  test('没有本地草稿时登录不弹迁移选择 @s0', async ({ page, mockApi }) => {
+    await page.goto('/login');
+    await page.getByPlaceholder('name@example.com').fill('test@example.com');
+    await page.getByPlaceholder('至少 6 位字符').fill('secret123');
+    await page.getByRole('button', { name: '立即登录' }).click();
+
+    await page.waitForURL(/\/dashboard/);
+    await expect(page.getByRole('dialog', { name: '这份本地草稿要同步到云端吗？' })).toHaveCount(0);
+    // 也从没替用户凭空建一份默认内容的简历
+    expect(mockApi.count('POST', '/api/resumes')).toBe(0);
+  });
+
   test('登录/注册 Tab 与 URL 双向同步 @s0', async ({ page }) => {
     await page.goto('/login');
     const loginTab = page.getByRole('tab', { name: '账号登录' });
@@ -88,6 +126,8 @@ test.describe('登录迁移 @s0', () => {
     await page.getByPlaceholder('如：极客小凡').fill('新用户');
     await page.getByPlaceholder('name@example.com').fill('new@example.com');
     await page.getByPlaceholder('至少 6 位字符').fill('secret123');
+    // 注册必须先勾选服务条款与隐私政策
+    await page.getByRole('checkbox', { name: /服务条款/ }).check();
     await page.getByRole('button', { name: '创建免费账号' }).click();
 
     await page.waitForURL(/\/dashboard/);

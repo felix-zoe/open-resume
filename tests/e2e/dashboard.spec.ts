@@ -26,12 +26,17 @@ test.describe('Dashboard 看板 @s1', () => {
 
     await expect(page.getByText('还没有简历')).toBeVisible();
 
-    // 三步新建：模板 → 命名 → 确认
+    // 四步新建：模板 → 起点 → 命名 → 确认
     await page.getByRole('button', { name: '新建第一份简历' }).click();
     const dialog = page.getByRole('dialog', { name: '新建一份简历' });
     await expect(dialog).toBeVisible();
 
     await dialog.getByRole('button', { name: /现代双栏型/ }).click();
+    await dialog.getByRole('button', { name: '下一步' }).click();
+
+    // 起点：空白 / 示例数据 / 复制已有（空列表时不可选）
+    await expect(dialog.getByRole('button', { name: /空白简历/ })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /复制已有简历/ })).toBeDisabled();
     await dialog.getByRole('button', { name: '下一步' }).click();
 
     await dialog.getByPlaceholder('如：前端工程师-张小凡').fill('前端工程师-李雷');
@@ -46,6 +51,33 @@ test.describe('Dashboard 看板 @s1', () => {
       title: '前端工程师-李雷',
       templateId: 'modern'
     });
+  });
+
+  test('新建时可从已有简历复制内容 @s1', async ({ page, mockApi }) => {
+    await login(page);
+    mockApi.seed({ id: 'res_src', title: '源简历', templateId: 'geek' });
+    await page.goto('/dashboard');
+    await expect(page.getByRole('heading', { name: '源简历' })).toBeVisible();
+
+    await page.getByRole('button', { name: '新建简历' }).click();
+    const dialog = page.getByRole('dialog', { name: '新建一份简历' });
+    await dialog.getByRole('button', { name: '下一步' }).click();
+
+    // 有简历后「复制已有」可选，选中后自动带出源简历的模板与名称
+    await dialog.getByRole('button', { name: /复制已有简历/ }).click();
+    await expect(dialog.getByLabel('从哪一份复制')).toHaveValue('res_src');
+    await dialog.getByRole('button', { name: '下一步' }).click();
+
+    const titleInput = dialog.getByPlaceholder('如：前端工程师-张小凡');
+    await expect(titleInput).toHaveValue('源简历 - 副本');
+    await dialog.getByRole('button', { name: '下一步' }).click();
+    await dialog.getByRole('button', { name: '创建并编辑' }).click();
+
+    await page.waitForURL(/\/editor\/res_/);
+    const created = mockApi.find('POST', '/api/resumes')[0];
+    expect(created.body).toMatchObject({ templateId: 'geek' });
+    // 内容来自源简历，而不是默认范文
+    expect(JSON.stringify(created.body)).toContain('张小凡');
   });
 
   test('未登录访问看板被重定向到登录页并带回跳参数 @s1', async ({ page }) => {
@@ -148,8 +180,57 @@ test.describe('Dashboard 看板 @s1', () => {
     await expect(page.getByText('还没有简历')).toBeVisible();
   });
 
-  test('列表只发 1 次列表 + 1 次汇总，不再 N+1 @s1', async ({ page, mockApi }) => {
+  test('卡片展示模板缩略图与完整度进度条 @s1', async ({ page, mockApi }) => {
     await login(page);
+    mockApi.seed({
+      id: 'res_partial',
+      title: '待完善简历',
+      templateId: 'modern',
+      completeness: { score: 60, missing: ['summary', 'metric', 'skills'] }
+    });
+
+    await page.goto('/dashboard');
+    await expect(page.getByRole('heading', { name: '待完善简历' })).toBeVisible();
+
+    const card = page.locator('div.bg-white', { hasText: '待完善简历' }).first();
+    // 缩略图是纯 CSS 的，只断言存在且对读屏隐藏
+    await expect(card.locator('.resume-thumb')).toHaveCount(1);
+    await expect(card.locator('.resume-thumb')).toHaveAttribute('aria-hidden', 'true');
+
+    await expect(card.getByText('完整度')).toBeVisible();
+    await expect(card.getByText('60%')).toBeVisible();
+    // 缺失项映射成中文，且只提示前两项，避免卡片被撑高
+    await expect(card.getByText('还缺 个人简介、量化数据')).toBeVisible();
+    await expect(card.getByText('技能')).toHaveCount(0);
+  });
+
+  test('可在网格与列表视图间切换，偏好本地记住 @s1', async ({ page, mockApi }) => {
+    await login(page);
+    mockApi.seed({ id: 'res_v1', title: '简历一' });
+    mockApi.seed({ id: 'res_v2', title: '简历二' });
+
+    await page.goto('/dashboard');
+    await expect(page.getByRole('heading', { name: '简历一' })).toBeVisible();
+
+    const grid = page.getByRole('button', { name: '网格视图' });
+    const list = page.getByRole('button', { name: '列表视图' });
+    await expect(grid).toHaveAttribute('aria-pressed', 'true');
+
+    await list.click();
+    await expect(list).toHaveAttribute('aria-pressed', 'true');
+    await expect(grid).toHaveAttribute('aria-pressed', 'false');
+    // 列表模式仍保留完整数据，只是省掉统计区块
+    await expect(page.getByRole('heading', { name: '简历一' })).toBeVisible();
+    await expect(page.getByText('完整度 100%')).toHaveCount(2);
+
+    await page.reload();
+    await expect(page.getByRole('button', { name: '列表视图' })).toHaveAttribute('aria-pressed', 'true');
+
+    await page.getByRole('button', { name: '网格视图' }).click();
+    await expect(page.getByRole('button', { name: '网格视图' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('列表只发 1 次列表 + 1 次汇总，不再 N+1 @s1', async ({ page, mockApi }) => {    await login(page);
     mockApi.seed({ id: 'res_1', title: '简历一' });
     mockApi.seed({ id: 'res_2', title: '简历二' });
     mockApi.seed({ id: 'res_3', title: '简历三' });

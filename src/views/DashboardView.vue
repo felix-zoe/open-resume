@@ -2,15 +2,17 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import Navbar from '../components/Navbar.vue';
+import AppFooter from '../components/AppFooter.vue';
 import AuthModal from '../components/AuthModal.vue';
-import CreateResumeDialog from '../components/dashboard/CreateResumeDialog.vue';
+import CreateResumeDialog, { type ResumeStart } from '../components/dashboard/CreateResumeDialog.vue';
+import ResumeCard from '../components/dashboard/ResumeCard.vue';
+import ShareDialog from '../components/share/ShareDialog.vue';
 import {
   AppBadge,
   AppButton,
   AppCard,
   AppEmpty,
   AppInput,
-  AppMenu,
   AppModal,
   AppSelect,
   AppSkeleton,
@@ -19,26 +21,17 @@ import {
 import { useAuthStore } from '../stores/auth';
 import { useResumes, type ResumeSummary } from '../composables/useResumes';
 import { apiFetch } from '../utils/http';
-import { DEFAULT_RESUME_CONTENT, DEFAULT_THEME_CONFIG } from '../utils/presets';
-import { useToast } from '../composables/useToast';
-import { findTemplate } from '../constants/templates';
 import {
-  Activity,
-  Copy,
-  Download,
-  Edit3,
-  ExternalLink,
-  Eye,
-  FileText,
-  Globe,
-  Lock,
-  MoreHorizontal,
-  Plus,
-  Search,
-  Share2,
-  TrendingUp,
-  Trash2
-} from 'lucide-vue-next';
+  DEFAULT_EN_RESUME_CONTENT,
+  DEFAULT_RESUME_CONTENT,
+  DEFAULT_THEME_CONFIG,
+  buildEmptyContent
+} from '../utils/presets';
+import type { ResumeContent, ThemeConfig } from '../types/resume';
+import type { ResumeLocale } from '../../shared/types';
+import { useToast } from '../composables/useToast';
+import { Activity, Briefcase, Download, FileText, LayoutGrid, List, Plus, Search } from 'lucide-vue-next';
+import { trackEvent } from '../utils/telemetry';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -62,22 +55,60 @@ const {
 const isCreateOpen = ref(false);
 const creating = ref(false);
 
-async function handleCreate(payload: { templateId: string; title: string }) {
+/** 起点为「复制已有」时，源简历的内容需要单独取一次（列表里只有摘要） */
+async function loadCopySource(id: string) {
+  const result = await apiFetch<{ content: ResumeContent; themeConfig: ThemeConfig }>(
+    `/api/resumes/${id}`
+  );
+  return result.ok && result.data ? result.data : null;
+}
+
+async function handleCreate(payload: {
+  templateId: string;
+  title: string;
+  start: ResumeStart;
+  copyFromId?: string;
+  locale?: ResumeLocale;
+}) {
   creating.value = true;
   try {
+    const locale = payload.locale ?? 'zh-CN';
+    // 空白起点：按语言给出对应的空骨架（英文简历的模块标题就是 Work Experience）
+    // 示例起点：中文给完整范文，英文给英文范文
+    let content =
+      payload.start === 'sample'
+        ? locale === 'en'
+          ? DEFAULT_EN_RESUME_CONTENT
+          : DEFAULT_RESUME_CONTENT
+        : buildEmptyContent(locale);
+    let themeConfig = DEFAULT_THEME_CONFIG;
+
+    if (payload.start === 'copy' && payload.copyFromId) {
+      const source = await loadCopySource(payload.copyFromId);
+      if (!source) {
+        toast.error('读取源简历失败，请稍后重试');
+        return;
+      }
+      // 深拷贝：直接引用会让新简历与源简历共享同一份对象，改一边动两边
+      content = JSON.parse(JSON.stringify(source.content)) as ResumeContent;
+      themeConfig = JSON.parse(JSON.stringify(source.themeConfig)) as ThemeConfig;
+    }
+
     const result = await apiFetch<{ id: string }>('/api/resumes', {
       method: 'POST',
       body: {
         title: payload.title,
         templateId: payload.templateId,
-        content: DEFAULT_RESUME_CONTENT,
-        themeConfig: DEFAULT_THEME_CONFIG
+        content,
+        themeConfig
       }
     });
     if (!result.ok || !result.data?.id) {
       toast.error(result.message || '新建简历失败');
       return;
     }
+    // 只记起点类型（空白/示例/复制），不记模板与简历 id
+    trackEvent(`resume.create.${payload.start}`);
     isCreateOpen.value = false;
     router.push(`/editor/${result.data.id}`);
   } finally {
@@ -85,9 +116,11 @@ async function handleCreate(payload: { templateId: string; title: string }) {
   }
 }
 
-function handleGuestNext(payload: { templateId: string }) {
+function handleGuestNext(payload: { templateId: string; locale?: ResumeLocale }) {
   isCreateOpen.value = false;
-  router.push({ path: '/editor/new', query: { template: payload.templateId } });
+  const query: Record<string, string> = { template: payload.templateId };
+  if (payload.locale && payload.locale !== 'zh-CN') query.locale = payload.locale;
+  router.push({ path: '/editor/new', query });
 }
 
 // ---------------- 搜索 / 排序 ----------------
@@ -123,6 +156,30 @@ const visibleResumes = computed(() => {
   });
 });
 
+// ---------------- 视图密度 ----------------
+type ViewMode = 'grid' | 'list';
+const VIEW_STORAGE_KEY = 'open_resume_dashboard_view';
+const viewMode = ref<ViewMode>('grid');
+
+const viewOptions = [
+  { value: 'grid' as const, label: '网格视图', icon: LayoutGrid },
+  { value: 'list' as const, label: '列表视图', icon: List }
+];
+
+onMounted(() => {
+  const saved = localStorage.getItem(VIEW_STORAGE_KEY);
+  if (saved === 'grid' || saved === 'list') viewMode.value = saved;
+});
+
+watch(viewMode, (value) => {
+  // 偏好写本地即可，没必要为展示密度打一次接口
+  try {
+    localStorage.setItem(VIEW_STORAGE_KEY, value);
+  } catch {
+    /* 隐私模式下写不进去，忽略 */
+  }
+});
+
 // ---------------- 单卡片操作 ----------------
 const openMenuId = ref<string | null>(null);
 
@@ -137,18 +194,22 @@ function formatTime(time: string | number) {
   return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
 }
 
-async function copyShareLink(item: ResumeSummary) {
-  if (item.isPublic !== 1) {
-    toast.info('请先开启公开分享，再复制链接');
-    return;
+/** 分享设置弹窗（token 化链接、有效期、密码、二维码），与编辑器共用同一组件 */
+const shareTarget = ref<ResumeSummary | null>(null);
+const shareDialogOpen = computed({
+  get: () => shareTarget.value !== null,
+  set: (value: boolean) => {
+    if (!value) shareTarget.value = null;
   }
-  const url = `${window.location.origin}/share/${item.id}`;
-  try {
-    await navigator.clipboard.writeText(url);
-    toast.success('只读分享链接已复制');
-  } catch {
-    toast.copyFallback('浏览器阻止了剪贴板写入，请手动复制链接', url);
-  }
+});
+
+function openShareDialog(item: ResumeSummary) {
+  openMenuId.value = null;
+  shareTarget.value = item;
+}
+
+function onSharePublicChange(value: number) {
+  if (shareTarget.value) shareTarget.value.isPublic = value;
 }
 
 async function handleDuplicate(item: ResumeSummary) {
@@ -201,7 +262,7 @@ async function submitRename() {
   }
 }
 
-// ---------------- 阅读足迹 ----------------
+// ---------------- 在线访问统计 ----------------
 const isAnalyticsOpen = ref(false);
 const analyticsTarget = ref<ResumeSummary | null>(null);
 const analyticsData = ref<any>(null);
@@ -249,12 +310,20 @@ onMounted(() => {
               针对不同岗位维护多份简历，导出 PDF 或生成在线只读链接
             </p>
           </div>
-          <AppButton @click="isCreateOpen = true">
-            <template #icon>
-              <Plus class="w-4 h-4" aria-hidden="true" />
-            </template>
-            <span>新建简历</span>
-          </AppButton>
+          <div class="flex items-center gap-2">
+            <AppButton variant="secondary" @click="router.push('/jobs')">
+              <template #icon>
+                <Briefcase class="w-4 h-4" aria-hidden="true" />
+              </template>
+              <span>投递管理</span>
+            </AppButton>
+            <AppButton @click="isCreateOpen = true">
+              <template #icon>
+                <Plus class="w-4 h-4" aria-hidden="true" />
+              </template>
+              <span>新建简历</span>
+            </AppButton>
+          </div>
         </div>
 
         <!-- 汇总指标 -->
@@ -296,10 +365,39 @@ onMounted(() => {
             @update:model-value="sortKey = $event as SortKey"
           />
         </div>
+
+        <!-- 视图密度：简历多了以后，列表一屏能扫十几份 -->
+        <div
+          class="hidden sm:inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-100 border border-slate-200 shrink-0"
+          role="group"
+          aria-label="切换视图"
+        >
+          <button
+            v-for="option in viewOptions"
+            :key="option.value"
+            type="button"
+            class="p-1.5 rounded-md transition"
+            :class="
+              viewMode === option.value
+                ? 'bg-white text-slate-800 shadow-xs'
+                : 'text-slate-500 hover:text-slate-700'
+            "
+            :aria-label="option.label"
+            :aria-pressed="viewMode === option.value"
+            :title="option.label"
+            @click="viewMode = option.value"
+          >
+            <component :is="option.icon" class="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
       <!-- 加载骨架 -->
-      <div v-if="loading && !resumes.length" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div
+        v-if="loading && !resumes.length"
+        class="grid gap-4"
+        :class="viewMode === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'"
+      >
         <AppCard v-for="i in 3" :key="i">
           <AppSkeleton height-class="h-3" class="w-1/3" />
           <AppSkeleton height-class="h-4" class="mt-3 w-3/4" />
@@ -319,15 +417,24 @@ onMounted(() => {
       <AppEmpty
         v-else-if="isEmpty"
         title="还没有简历"
-        description="新建一份简历只需三步：选择模板、填写名称、开始编辑。内容会自动保存。"
+        description="新建一份简历只需四步：选模板、选起点、命名、开始编辑。内容会自动保存。"
       >
         <template #action>
-          <AppButton @click="isCreateOpen = true">
-            <template #icon>
-              <Plus class="w-4 h-4" aria-hidden="true" />
-            </template>
-            <span>新建第一份简历</span>
-          </AppButton>
+          <div class="flex flex-wrap items-center justify-center gap-2">
+            <AppButton @click="isCreateOpen = true">
+              <template #icon>
+                <Plus class="w-4 h-4" aria-hidden="true" />
+              </template>
+              <span>新建第一份简历</span>
+            </AppButton>
+            <!-- 第二条路径：不知道怎么写的人先看示例，比对着空白表单发呆有用 -->
+            <AppButton variant="secondary" @click="router.push('/editor/demo')">
+              <template #icon>
+                <FileText class="w-4 h-4" aria-hidden="true" />
+              </template>
+              <span>先看示例简历</span>
+            </AppButton>
+          </div>
         </template>
       </AppEmpty>
 
@@ -342,140 +449,31 @@ onMounted(() => {
         </template>
       </AppEmpty>
 
-      <!-- 简历网格 -->
-      <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <AppCard
+      <!-- 简历列表 -->
+      <div
+        v-else
+        class="grid gap-4"
+        :class="viewMode === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'"
+      >
+        <ResumeCard
           v-for="item in visibleResumes"
           :key="item.id"
-          class="flex flex-col"
-          :class="busyId === item.id && 'opacity-70'"
-        >
-          <div class="flex items-start justify-between gap-2">
-            <div class="flex flex-wrap items-center gap-1.5 min-w-0">
-              <AppBadge tone="neutral">{{ findTemplate(item.templateId).shortName }}</AppBadge>
-              <AppBadge :tone="item.isPublic === 1 ? 'success' : 'neutral'" dot>
-                <component :is="item.isPublic === 1 ? Globe : Lock" class="w-3 h-3" aria-hidden="true" />
-                {{ item.isPublic === 1 ? '公开' : '私有' }}
-              </AppBadge>
-            </div>
+          :item="item"
+          :mode="viewMode"
+          :busy="busyId === item.id"
+          :menu-open="openMenuId === item.id"
+          @update:menu-open="openMenuId = $event ? item.id : null"
+          @rename="openRename(item)"
+          @duplicate="handleDuplicate(item)"
+          @delete="handleDelete(item)"
+          @toggle-share="toggleShare(item)"
+          @share-settings="openShareDialog(item)"
+          @analytics="openAnalytics(item)"
+        />
 
-            <AppMenu
-              :open="openMenuId === item.id"
-              aria-label="简历操作"
-              @update:open="openMenuId = $event ? item.id : null"
-            >
-              <template #trigger="{ open }">
-                <button
-                  type="button"
-                  class="p-1.5 -mr-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
-                  aria-label="更多操作"
-                  :aria-expanded="open"
-                  @click.stop="openMenuId = open ? null : item.id"
-                >
-                  <MoreHorizontal class="w-4 h-4" />
-                </button>
-              </template>
-
-              <button
-                type="button"
-                role="menuitem"
-                class="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
-                @click="openRename(item)"
-              >
-                <Edit3 class="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
-                <span>重命名</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                class="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
-                @click="handleDuplicate(item)"
-              >
-                <Copy class="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
-                <span>复制一份副本</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                class="w-full flex items-center gap-2 px-3 py-2 text-xs text-danger-600 hover:bg-danger-50"
-                @click="handleDelete(item)"
-              >
-                <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
-                <span>删除</span>
-              </button>
-            </AppMenu>
-          </div>
-
-          <h2 class="text-sm font-bold text-slate-900 mt-3 truncate" :title="item.title">
-            {{ item.title }}
-          </h2>
-          <p class="text-2xs text-slate-500 mt-1 flex items-center gap-1.5">
-            <FileText class="w-3 h-3" aria-hidden="true" />
-            <span>更新于 {{ formatTime(item.updatedAt) }}</span>
-          </p>
-
-          <!-- 阅读数据 -->
-          <button
-            type="button"
-            class="mt-3 p-2.5 rounded-lg bg-slate-50 hover:bg-primary-50/60 border border-slate-100 text-left transition"
-            @click="openAnalytics(item)"
-          >
-            <div class="flex items-center gap-3 text-2xs text-slate-600">
-              <span class="flex items-center gap-1">
-                <Eye class="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
-                <span class="font-bold font-mono">{{ item.stats.totalViews }}</span> 浏览
-              </span>
-              <span class="flex items-center gap-1">
-                <Activity class="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
-                <span class="font-bold font-mono">{{ item.stats.avgDuration }}s</span> 均长
-              </span>
-              <span class="flex items-center gap-1 ml-auto text-primary-600 font-semibold">
-                <TrendingUp class="w-3 h-3" aria-hidden="true" />
-                <span>足迹</span>
-              </span>
-            </div>
-          </button>
-
-          <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-            <router-link
-              :to="`/editor/${item.id}`"
-              class="inline-flex items-center gap-1.5 text-xs font-bold text-primary-700 bg-primary-50 hover:bg-primary-100 px-3 py-1.5 rounded-lg transition"
-            >
-              <Edit3 class="w-3.5 h-3.5" aria-hidden="true" />
-              <span>编辑</span>
-            </router-link>
-
-            <div class="flex items-center gap-1">
-              <button
-                type="button"
-                class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
-                :aria-label="item.isPublic === 1 ? '关闭公开分享' : '开启公开分享'"
-                @click="toggleShare(item)"
-              >
-                <component :is="item.isPublic === 1 ? Globe : Lock" class="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
-                aria-label="复制分享链接"
-                @click="copyShareLink(item)"
-              >
-                <Share2 class="w-3.5 h-3.5" />
-              </button>
-              <router-link
-                :to="`/share/${item.id}`"
-                target="_blank"
-                class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
-                aria-label="打开在线只读页"
-              >
-                <ExternalLink class="w-3.5 h-3.5" />
-              </router-link>
-            </div>
-          </div>
-        </AppCard>
-
-        <!-- 新建卡片 -->
+        <!-- 新建卡片：列表模式下收成一条横条，避免在密集视图里显得突兀 -->
         <button
+          v-if="viewMode === 'grid'"
           type="button"
           class="border-2 border-dashed border-slate-300 hover:border-primary-400 hover:bg-primary-50/30 rounded-xl p-5 min-h-[210px] flex flex-col items-center justify-center text-center transition group"
           @click="isCreateOpen = true"
@@ -488,6 +486,15 @@ onMounted(() => {
           </span>
           <span class="text-2xs text-slate-500 mt-1">为不同岗位准备不同版本</span>
         </button>
+        <button
+          v-else
+          type="button"
+          class="w-full py-3 border-2 border-dashed border-slate-300 hover:border-primary-400 hover:bg-primary-50/30 rounded-xl text-xs font-bold text-slate-600 hover:text-primary-700 transition flex items-center justify-center gap-2"
+          @click="isCreateOpen = true"
+        >
+          <Plus class="w-4 h-4" aria-hidden="true" />
+          <span>新建一份针对性简历</span>
+        </button>
       </div>
     </main>
 
@@ -496,6 +503,7 @@ onMounted(() => {
       v-model:open="isCreateOpen"
       :guest="!authStore.isLoggedIn"
       :creating="creating"
+      :existing="resumes.map((item) => ({ id: item.id, title: item.title, templateId: item.templateId }))"
       @create="handleCreate"
       @guest-next="handleGuestNext"
     />
@@ -522,15 +530,15 @@ onMounted(() => {
       </template>
     </AppModal>
 
-    <!-- 阅读足迹 -->
-    <AppModal v-model:open="analyticsOpen" title="阅读足迹">
+    <!-- 在线访问统计 -->
+    <AppModal v-model:open="analyticsOpen" title="在线访问统计">
       <template #header>
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 rounded-lg bg-primary-50 text-primary-600 flex items-center justify-center">
             <Activity class="w-4 h-4" aria-hidden="true" />
           </div>
           <div class="min-w-0">
-            <h2 class="text-sm font-bold text-slate-900">阅读足迹</h2>
+            <h2 class="text-sm font-bold text-slate-900">在线访问统计</h2>
             <p class="text-2xs text-slate-500 truncate">{{ analyticsTarget?.title }}</p>
           </div>
         </div>
@@ -542,11 +550,17 @@ onMounted(() => {
       </div>
 
       <template v-else>
-        <div class="grid grid-cols-3 gap-2.5 text-center">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
           <div class="p-3 bg-slate-50 rounded-lg border border-slate-100">
             <div class="text-2xs text-slate-500">累计浏览</div>
             <div class="text-lg font-bold text-slate-900 font-mono mt-0.5">
               {{ analyticsData?.totalViews || 0 }}
+            </div>
+          </div>
+          <div class="p-3 bg-slate-50 rounded-lg border border-slate-100">
+            <div class="text-2xs text-slate-500">独立访客</div>
+            <div class="text-lg font-bold text-slate-900 font-mono mt-0.5">
+              {{ analyticsData?.uniqueVisitors || 0 }}
             </div>
           </div>
           <div class="p-3 bg-slate-50 rounded-lg border border-slate-100">
@@ -570,15 +584,18 @@ onMounted(() => {
             :key="visit.id"
             class="p-2.5 bg-white rounded-lg border border-slate-100 flex items-center justify-between text-xs"
           >
-            <span class="flex items-center gap-2 text-slate-600">
+            <span class="flex items-center gap-2 text-slate-600 min-w-0">
               <span
-                class="w-1.5 h-1.5 rounded-full"
+                class="w-1.5 h-1.5 rounded-full shrink-0"
                 :class="visit.isDownloaded ? 'bg-success-500' : 'bg-primary-500'"
                 aria-hidden="true"
               />
-              {{ formatTime(visit.createdAt) }}
+              <span class="truncate">
+                {{ formatTime(visit.createdAt) }}
+                <span v-if="visit.referer" class="text-slate-500"> · 来自 {{ visit.referer }}</span>
+              </span>
             </span>
-            <span class="flex items-center gap-2 text-slate-500 font-mono">
+            <span class="flex items-center gap-2 text-slate-500 font-mono shrink-0">
               <span>{{ visit.duration }}s</span>
               <AppBadge v-if="visit.isDownloaded" tone="success">
                 <Download class="w-3 h-3" aria-hidden="true" />
@@ -588,7 +605,12 @@ onMounted(() => {
           </li>
         </ul>
         <p v-else class="text-center py-8 text-xs text-slate-500 leading-relaxed">
-          还没有阅读记录。把在线只读链接发给 HR 后，这里会显示打开时间与停留时长。
+          还没有访问记录。把在线只读链接发给 HR 后，这里会显示打开时间与停留时长。
+        </p>
+
+        <p class="text-2xs text-slate-500 mt-3 leading-relaxed">
+          统计为估算值：已过滤常见爬虫与链接预览，同一访客 30 分钟内的重复刷新只计一次，
+          单次停留上限 30 分钟。
         </p>
       </template>
 
@@ -597,6 +619,18 @@ onMounted(() => {
       </template>
     </AppModal>
 
+    <!-- 分享设置 -->
+    <ShareDialog
+      v-if="shareTarget"
+      v-model:open="shareDialogOpen"
+      :resume-id="shareTarget.id"
+      :resume-title="shareTarget.title"
+      :is-public="shareTarget.isPublic"
+      @update:is-public="onSharePublicChange"
+    />
+
     <AuthModal :isOpen="isAuthModalOpen" @close="isAuthModalOpen = false" @success="load" />
+
+    <AppFooter compact />
   </div>
 </template>
