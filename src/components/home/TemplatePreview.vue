@@ -3,8 +3,10 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import ClassicTemplate from '../../templates/ClassicTemplate.vue';
 import GeekTemplate from '../../templates/GeekTemplate.vue';
 import ModernTemplate from '../../templates/ModernTemplate.vue';
+import AtsTemplate from '../../templates/AtsTemplate.vue';
 import { DEFAULT_RESUME_CONTENT, DEFAULT_THEME_CONFIG } from '../../utils/presets';
 import { A4_WIDTH_PX } from '../../utils/a4';
+import type { ResumeContent, ThemeConfig } from '../../types/resume';
 
 /**
  * 真实模板预览。
@@ -15,9 +17,13 @@ import { A4_WIDTH_PX } from '../../utils/a4';
  */
 const props = withDefaults(
   defineProps<{
-    templateId: 'classic' | 'geek' | 'modern';
+    templateId: 'classic' | 'geek' | 'modern' | 'ats';
+    /** 可选内容：示例页要展示岗位专属的范文，缺省用默认范文 */
+    content?: ResumeContent;
+    /** 可选主题：缺省用默认主题配置 */
+    theme?: ThemeConfig;
   }>(),
-  {}
+  { content: undefined, theme: undefined }
 );
 
 const rootRef = ref<HTMLElement | null>(null);
@@ -26,11 +32,12 @@ const scale = ref(0.24);
 const component = computed(() => {
   if (props.templateId === 'geek') return GeekTemplate;
   if (props.templateId === 'modern') return ModernTemplate;
+  if (props.templateId === 'ats') return AtsTemplate;
   return ClassicTemplate;
 });
 
-const content = DEFAULT_RESUME_CONTENT;
-const theme = DEFAULT_THEME_CONFIG;
+const content = computed(() => props.content ?? DEFAULT_RESUME_CONTENT);
+const theme = computed(() => props.theme ?? DEFAULT_THEME_CONFIG);
 
 let observer: ResizeObserver | null = null;
 
@@ -53,7 +60,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="rootRef" class="template-preview relative overflow-hidden bg-slate-100" aria-hidden="true">
+  <!--
+    `inert` 与 `aria-hidden` 一起用：预览是装饰，里面的模板链接不该进 Tab 顺序。
+    只写 aria-hidden 时，读屏器会忽略它们但键盘仍能聚焦到隐藏区域内的链接
+    （axe 的 aria-hidden-focus 规则会直接判 serious）。
+  -->
+  <div
+    ref="rootRef"
+    class="template-preview relative overflow-hidden bg-slate-100"
+    aria-hidden="true"
+    inert
+  >
     <div class="template-preview-scaler" :style="{ transform: `scale(${scale})` }">
       <div class="w-[210mm] min-h-[297mm] bg-white">
         <component :is="component" :content="content" :theme="theme" />

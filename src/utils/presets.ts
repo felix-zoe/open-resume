@@ -1,4 +1,6 @@
 import { ResumeContent, ThemeConfig } from '../types/resume';
+import { MODULE_TITLES, normalizeLocale } from '../i18n/resumeLabels';
+import type { ResumeLocale } from '../../shared/types';
 
 export const DEFAULT_THEME_CONFIG: ThemeConfig = {
   themeColor: '#2563EB', // 经典科技蓝
@@ -20,12 +22,14 @@ export const DEFAULT_RESUME_CONTENT: ResumeContent = {
     location: '北京 · 海淀',
     workYears: '5年全栈研发经验',
     salaryExpectation: '25k-35k',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
+    // 本地占位图：外链头像在弱网/受限网络下会加载失败，打印时留白
+    avatar: '/avatar-placeholder.svg',
     showAvatar: true,
     github: 'https://github.com/example',
     website: 'https://blog.example.com',
     summary: '5年前端全栈开发经验，精通 Vue3、TypeScript 与微前端工程化体系。具备大型中后台与高性能富文本引擎设计实战经验，主导过亿级流量产品架构演进。'
   },
+  locale: 'zh-CN',
   modulesOrder: ['work', 'projects', 'skills', 'education', 'custom'],
   modules: {
     work: {
@@ -120,3 +124,146 @@ export const DEFAULT_RESUME_CONTENT: ResumeContent = {
     }
   }
 };
+
+/**
+ * 英文简历的示例数据。
+ *
+ * 与中文版的差别不只是翻译：
+ * · 日期用 `MM/YYYY`（英文简历的通行写法）；
+ * · 不写薪资期望、不写工作年限里的「N 年经验」换算口径（英文简历通常由 JD 判断）；
+ * · bullet 以强动词开头并带量化指标，这是英文简历最被看重的一点；
+ * · 技能写成短句而非标签串，便于 ATS 解析。
+ */
+export const DEFAULT_EN_RESUME_CONTENT: ResumeContent = {
+  locale: 'en',
+  profile: {
+    name: 'Alex Zhang',
+    title: 'Senior Frontend Engineer',
+    email: 'alex.zhang@example.com',
+    phone: '+86 138 0013 8000',
+    location: 'Beijing, China',
+    avatar: '/avatar-placeholder.svg',
+    showAvatar: false,
+    github: 'https://github.com/example',
+    website: 'https://blog.example.com',
+    summary:
+      'Frontend engineer with 5 years building large-scale web applications. Specialized in Vue 3, TypeScript and design-system engineering; led the architecture of a visualization engine serving 100M+ monthly page views.'
+  },
+  modulesOrder: ['work', 'projects', 'skills', 'education', 'custom'],
+  modules: {
+    work: {
+      visible: true,
+      title: 'Work Experience',
+      items: [
+        {
+          id: 'work-en-1',
+          company: 'Leading Internet Group',
+          department: 'Frontend Architecture',
+          position: 'Frontend Tech Lead',
+          startDate: '07/2022',
+          endDate: 'Present',
+          description:
+            '• Architected a low-code layout engine on Web Components, splitting 40+ atomic components and raising reuse to 85%.\n• Cut memory usage by 45% and held 58+ FPS on long lists through virtualization and OffscreenCanvas rendering.\n• Automated the CI/CD pipeline and unified lint rules, reducing code review turnaround by 30%.'
+        },
+        {
+          id: 'work-en-2',
+          company: 'Fast-growing Tech Unicorn',
+          department: 'Platform Team',
+          position: 'Frontend Engineer',
+          startDate: '07/2020',
+          endDate: '06/2022',
+          description:
+            '• Built a Vue 3 + Vite + Pinia collaboration suite from scratch, serving 200+ branch offices nationwide.\n• Moved heavy export workloads into Web Workers, eliminating UI freezes during large data exports.'
+        }
+      ]
+    },
+    projects: {
+      visible: true,
+      title: 'Projects',
+      items: [
+        {
+          id: 'proj-en-1',
+          name: 'OpenResume — A4 Resume Rendering Platform',
+          role: 'Solo Developer',
+          startDate: '08/2023',
+          endDate: '03/2024',
+          link: 'https://github.com/open-resume',
+          description:
+            '• Built a CSS Paged Media rendering engine that produces print-accurate A4 pages with selectable text.\n• Shipped a zero-server-cost architecture on Cloudflare Workers, D1 and R2 with P99 latency under 45ms.\n• Decoupled content from layout so templates can be hot-swapped without data loss.'
+        }
+      ]
+    },
+    skills: {
+      visible: true,
+      title: 'Skills',
+      items: [
+        'Vue 3 / TypeScript / Vite — component design, reactivity, build tooling',
+        'Browser rendering, CSS Paged Media, performance profiling and Web Vitals',
+        'Cloudflare Workers / D1 / R2 and Node.js services',
+        'Design systems, accessibility (WCAG 2.1 AA) and automated testing'
+      ]
+    },
+    education: {
+      visible: true,
+      title: 'Education',
+      items: [
+        {
+          id: 'edu-en-1',
+          school: 'Beihang University',
+          major: 'Software Engineering',
+          degree: 'M.Eng.',
+          startDate: '09/2018',
+          endDate: '06/2020',
+          description: 'GPA 3.82/4.0 (top 5%). National Graduate Scholarship.'
+        },
+        {
+          id: 'edu-en-2',
+          school: 'Shandong University',
+          major: 'Computer Science',
+          degree: 'B.Eng.',
+          startDate: '09/2014',
+          endDate: '06/2018',
+          description: 'Coursework: Operating Systems, Data Structures, Compilers.'
+        }
+      ]
+    },
+    custom: {
+      visible: true,
+      title: 'Honors',
+      items: [
+        'ACM-ICPC Regional Contest — Bronze Medal',
+        'Engineering Excellence Award, 2023'
+      ]
+    }
+  }
+};
+
+/**
+ * 空简历骨架。
+ *
+ * 标题按语言取默认值——新建一份英文简历后，用户第一眼看到的是
+ * 「Work Experience」而不是中文标题再手动改一遍。
+ */
+export function buildEmptyContent(locale: unknown = 'zh-CN'): ResumeContent {
+  const target = normalizeLocale(locale) as ResumeLocale;
+  const titles = MODULE_TITLES[target];
+  const isEn = target === 'en';
+  return {
+    locale: target,
+    profile: {
+      name: isEn ? '' : '姓名',
+      title: isEn ? '' : '求职意向',
+      email: '',
+      phone: '',
+      showAvatar: false
+    },
+    modulesOrder: ['work', 'projects', 'skills', 'education', 'custom'],
+    modules: {
+      work: { visible: true, title: titles.work, items: [] },
+      projects: { visible: true, title: titles.projects, items: [] },
+      skills: { visible: true, title: titles.skills, items: [] },
+      education: { visible: true, title: titles.education, items: [] },
+      custom: { visible: false, title: titles.custom, items: [] }
+    }
+  };
+}

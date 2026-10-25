@@ -50,18 +50,24 @@ export default {
         // 11px：界面元信息的最小字号（替代散落的 text-[10px]/text-[11px]）
         '2xs': ['11px', '16px']
       },
+      // 阴影四档，全部使用低透明度 slate（见方案 1.3.1）
       boxShadow: {
-        '2xs': '0 1px 1px rgba(15, 23, 42, 0.04)',
-        xs: '0 1px 2px rgba(15, 23, 42, 0.06)'
+        xs: '0 1px 2px rgba(15, 23, 42, 0.06)',
+        sm: '0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04)',
+        md: '0 4px 12px rgba(15, 23, 42, 0.08)',
+        lg: '0 12px 32px rgba(15, 23, 42, 0.12)'
       },
+      // 圆角刻度显式声明，取值与 Tailwind 默认一致：
+      // 方案 1.3.1 的 xs–2xl 是整体上移一档的写法，直接套用会把全站圆角放大 4px，
+      // 因此保留现有视觉，只把刻度固定下来避免依赖默认值。
       borderRadius: {
-        xs: '2px'
-      },
-      backdropBlur: {
-        '2xs': '2px'
-      },
-      spacing: {
-        '4.5': '1.125rem'
+        xs: '2px',
+        sm: '4px',
+        md: '6px',
+        lg: '8px',
+        xl: '12px',
+        '2xl': '16px',
+        '3xl': '24px'
       }
     },
   },

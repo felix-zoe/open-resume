@@ -4,19 +4,53 @@ import { useResumeStore } from "../../stores/resume";
 import ClassicTemplate from "../../templates/ClassicTemplate.vue";
 import GeekTemplate from "../../templates/GeekTemplate.vue";
 import ModernTemplate from "../../templates/ModernTemplate.vue";
+import AtsTemplate from "../../templates/AtsTemplate.vue";
 import {
   A4_HEIGHT_PX,
   A4_WIDTH_PX,
+  MM_TO_PX,
   RESUME_DOC_SELECTOR,
   getBreakLines,
   getPageCount,
+  getUsableHeight,
 } from "../../utils/a4";
 
 const resumeStore = useResumeStore();
 const paperRef = ref<HTMLElement | null>(null);
 const contentHeight = ref<number>(0);
 
-const pageCount = computed(() => getPageCount(contentHeight.value));
+/**
+ * 页边距由纸张承担，而不是模板根节点。
+ *
+ * 这样打印时 `@page { margin }` 会给每一页都留出边距；预览里用同样的
+ * padding，断线位置才能和真实分页对齐。
+ */
+const pagePaddingPx = computed(() => {
+  const mm = Number(resumeStore.themeConfig.pagePadding);
+  return Number.isFinite(mm) && mm >= 0 ? mm * MM_TO_PX : 0;
+});
+
+/**
+ * Modern 模板的侧栏底色需要铺满整张纸，因此它自己承担页边距；
+ * 其余模板由纸张统一提供 padding。两者的可用高度算法一致。
+ */
+const paperOwnsPadding = computed(() => resumeStore.templateId !== "modern");
+
+const paperPaddingStyle = computed(() => {
+  if (!paperOwnsPadding.value) return {};
+  const px = pagePaddingPx.value;
+  return {
+    paddingTop: `${px}px`,
+    paddingBottom: `${px}px`,
+    paddingLeft: `${px}px`,
+    paddingRight: `${px}px`,
+  };
+});
+
+/** 一页能容纳的内容高度（已扣除上下页边距） */
+const usableHeight = computed(() => getUsableHeight(resumeStore.themeConfig.pagePadding));
+
+const pageCount = computed(() => getPageCount(contentHeight.value, usableHeight.value));
 
 // 动态匹配模板组件
 const currentTemplateComponent = computed(() => {
@@ -25,6 +59,8 @@ const currentTemplateComponent = computed(() => {
       return GeekTemplate;
     case "modern":
       return ModernTemplate;
+    case "ats":
+      return AtsTemplate;
     case "classic":
     default:
       return ClassicTemplate;
@@ -32,7 +68,12 @@ const currentTemplateComponent = computed(() => {
 });
 
 // 断线位置与页数共用同一套度量，避免“显示 2 页但没有断线”这类矛盾
-const breakLinePositions = computed(() => getBreakLines(contentHeight.value));
+const breakLinePositions = computed(() => getBreakLines(contentHeight.value, usableHeight.value));
+
+/** 断线在屏幕上的 y 坐标 = 内容坐标 + 纸张顶部 padding */
+const breakLineStyles = computed(() =>
+  breakLinePositions.value.map((y) => ({ top: `${y + pagePaddingPx.value}px` }))
+);
 
 /**
  * 尺寸补偿容器：外层占位按缩放后的实际尺寸参与布局。
@@ -112,10 +153,13 @@ watch(
       <!-- 尺寸补偿容器：高度随缩放变化，保证可完整滚动 -->
       <div class="zoom-scaler relative" :style="scalerStyle">
         <div class="canvas-zoom-container" :style="canvasStyle">
-          <!-- A4 纸张实体 -->
+          <!-- A4 纸张实体：页边距由纸张承担，多页时每页都有完整留白 -->
           <div
             ref="paperRef"
-            class="a4-page a4-print-target bg-white shadow-xl rounded-sm transition-all duration-200 relative select-text"
+            class="a4-page a4-print-target bg-white shadow-xl rounded-sm relative select-text"
+            :style="paperPaddingStyle"
+            role="document"
+            :aria-label="`${resumeStore.title || '简历'} 预览`"
           >
             <!-- 动态模板加载 -->
             <component
@@ -125,10 +169,10 @@ watch(
             />
 
             <!-- 动态分页指示虚线 (仅屏幕预览可见，打印时自动隐藏) -->
-            <template v-for="(yPos, index) in breakLinePositions" :key="index">
+            <template v-for="(lineStyle, index) in breakLineStyles" :key="index">
               <div
                 class="page-indicator-line no-print absolute left-0 w-full pointer-events-none z-10 flex items-center justify-between"
-                :style="{ top: `${yPos}px` }"
+                :style="lineStyle"
               >
                 <div
                   class="w-full border-b-2 border-dashed border-rose-400 opacity-70"
@@ -136,7 +180,7 @@ watch(
                 <span
                   class="absolute right-4 -top-3 bg-rose-50 text-rose-600 text-2xs font-mono px-2 py-0.5 rounded border border-rose-300 shadow-xs"
                 >
-                  ⚠️ 第 {{ index + 1 }} 页截断线 (建议微调间距收敛)
+                  第 {{ index + 1 }} 页截断线
                 </span>
               </div>
             </template>

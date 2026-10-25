@@ -4,6 +4,7 @@ import { useResumeStore } from '../stores/resume';
 import { TEMPLATES } from '../constants/templates';
 import { Check } from 'lucide-vue-next';
 import { AppModal, cx } from './ui';
+import TemplatePreview from './home/TemplatePreview.vue';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -49,15 +50,9 @@ const selectTemplate = (id: string) => {
         :aria-pressed="resumeStore.templateId === tpl.id"
         @click="selectTemplate(tpl.id)"
       >
-        <div
-          class="w-12 h-16 rounded border border-slate-300 flex-shrink-0 flex flex-col p-1 gap-1 shadow-2xs"
-          :class="tpl.accent"
-          aria-hidden="true"
-        >
-          <div class="h-1.5 bg-slate-400/60 rounded-xs w-3/4 mx-auto" />
-          <div class="h-1 bg-slate-300/60 rounded-xs w-full" />
-          <div class="h-1 bg-slate-300/60 rounded-xs w-5/6" />
-          <div class="h-1 bg-slate-300/60 rounded-xs w-4/5" />
+        <!-- 真实模板缩略图：与首页共用 TemplatePreview，不再画骨架图 -->
+        <div class="w-14 h-20 flex-shrink-0 rounded border border-slate-200 overflow-hidden">
+          <TemplatePreview :template-id="tpl.id" />
         </div>
 
         <div class="flex-1 min-w-0">

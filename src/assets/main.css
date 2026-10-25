@@ -1,3 +1,6 @@
+/* 简历文档视觉域（模板排版变量与语义类），与 App Chrome 隔离 */
+@import '../templates/resume.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -87,7 +90,11 @@
     display: none !important;
   }
 
-  /* 物理 A4 纸张规范 */
+  /*
+   * 物理 A4 纸张规范。
+   * `margin: 0` 让浏览器按 210×297mm 满幅分页；简历的页边距由纸张元素
+   * 自身的 padding 提供，因此分页后的每一页都带同样的留白（RENDER-04）。
+   */
   @page {
     size: A4 portrait;
     margin: 0;
@@ -140,5 +147,32 @@
   .resume-section-item {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
+  }
+
+  /*
+   * 导出弹窗的打印选项（由 ExportDialog 在 <html> 上临时加类）。
+   *
+   * · print-ink-saving：去掉色块背景，只保留文字与线条 —— 黑白打印机上
+   *   大面积深色底会糊成一片，且极其耗墨。
+   * · print-hide-links：把外链降级为纯文本，避免打印出一长串 URL。
+   */
+  .print-ink-saving .resume-doc,
+  .print-ink-saving .resume-doc * {
+    background: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+  }
+
+  .print-ink-saving .resume-doc {
+    color: #111827 !important;
+  }
+
+  .print-hide-links .resume-doc a {
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+
+  .print-hide-links .resume-doc a[href]::after {
+    content: '' !important;
   }
 }

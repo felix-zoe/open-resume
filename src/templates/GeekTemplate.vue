@@ -2,7 +2,15 @@
 import { computed } from 'vue';
 import { ResumeContent, ThemeConfig } from '../types/resume';
 import { safeUrl } from '../utils/url';
-import { Terminal, ExternalLink } from 'lucide-vue-next';
+import { Terminal, ExternalLink, Mail, Phone, MapPin, Briefcase, Wallet, Github, Globe } from 'lucide-vue-next';
+import { buildDocStyle, showSalaryOf } from './theme';
+import {
+  MODULE_CODE_LABELS,
+  formatDateRange,
+  getLabels,
+  resolveModuleTitle,
+  wrapParen
+} from '../i18n/resumeLabels';
 
 const props = defineProps<{
   content: ResumeContent;
@@ -16,142 +24,161 @@ const modulesOrder = computed(() => props.content.modulesOrder || ['skills', 'wo
 // 用户输入的外链必须先校验协议，避免 javascript: 在公开分享页执行
 const githubUrl = computed(() => safeUrl(profile.value.github));
 const websiteUrl = computed(() => safeUrl(profile.value.website));
+const showSalary = computed(() => showSalaryOf(props.theme, profile.value));
 
-const containerStyle = computed(() => ({
-  fontSize: `${props.theme.fontSize}px`,
-  lineHeight: props.theme.lineHeight,
-  padding: `${props.theme.pagePadding}mm`
-}));
+const docStyle = computed(() => buildDocStyle(props.theme));
 
-const sectionMarginStyle = computed(() => ({
-  marginBottom: `${props.theme.sectionSpacing}px`
-}));
+/**
+ * 极客模板的模块标题：主标题跟随简历语言，英文副标签始终保留。
+ *
+ * 副标签是版式的一部分（`#SKILLS` 这种代码风），不是语言——中文简历里
+ * 也照样显示，所以不随 locale 变化。
+ */
+const sectionLabels = MODULE_CODE_LABELS;
 
-const paragraphMarginStyle = computed(() => ({
-  marginBottom: `${props.theme.paragraphSpacing}px`
-}));
+const locale = computed(() => props.content.locale);
+const labels = computed(() => getLabels(locale.value));
+const titleOf = (key: keyof typeof sectionLabels, fallback?: string) =>
+  resolveModuleTitle(key, fallback, locale.value);
+
+/** 技能形态（TPL-04）：极客模板默认标签，显式选「整句」时才逐行 */
+const isSentenceSkills = computed(() => modules.value.skills.type === 'sentence');
 </script>
 
 <template>
-  <div class="geek-template resume-doc w-full bg-white text-slate-800" :class="theme.fontFamily || 'font-mono'" :style="containerStyle">
+  <div class="geek-template resume-doc w-full bg-white" :class="theme.fontFamily || 'font-mono'" :style="docStyle">
     <!-- 极客风头部 -->
-    <div class="resume-header border-l-4 pl-4 py-1 mb-5" :style="{ borderColor: theme.themeColor }">
+    <div class="resume-header pl-4 py-1 mb-5" :style="{ borderLeft: `4px solid ${theme.themeColor}` }">
       <div class="flex items-center justify-between">
-        <div>
-          <h1 class="text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2">
-            <Terminal class="w-6 h-6 inline-block" :style="{ color: theme.themeColor }" />
-            {{ profile.name || '姓名' }}
+        <div class="min-w-0">
+          <h1 class="rs-name flex items-center gap-2">
+            <Terminal class="rs-icon" :style="{ color: theme.themeColor }" />
+            {{ profile.name || labels.name }}
           </h1>
-          <p class="text-sm font-semibold text-slate-600 mt-0.5">
-            {{ profile.title || '求职意向' }}
-          </p>
+          <p class="rs-job-title mt-0.5">{{ profile.title || labels.jobTitle }}</p>
         </div>
-        <div v-if="profile.showAvatar && profile.avatar" class="ml-4">
-          <img :src="profile.avatar" alt="Avatar" class="w-16 h-16 rounded-full object-cover border-2" :style="{ borderColor: theme.themeColor }" />
+        <div v-if="profile.showAvatar && profile.avatar" class="ml-4 flex-shrink-0">
+          <img
+            :src="profile.avatar"
+            alt=""
+            loading="lazy"
+            width="100"
+            height="100"
+            class="rounded-full object-cover"
+            :style="{ width: '4.2em', height: '4.2em', border: `2px solid ${theme.themeColor}` }"
+          />
         </div>
       </div>
 
-      <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 mt-2 font-sans">
-        <span v-if="profile.phone">📱 {{ profile.phone }}</span>
-        <span v-if="profile.email">✉️ {{ profile.email }}</span>
-        <span v-if="profile.location">📍 {{ profile.location }}</span>
-        <span v-if="profile.workYears">💼 {{ profile.workYears }}</span>
-        <span v-if="profile.salaryExpectation" class="text-emerald-700">💰 {{ profile.salaryExpectation }}</span>
-        <a v-if="githubUrl" :href="githubUrl" target="_blank" rel="noopener noreferrer" class="flex items-center gap-0.5 text-slate-700 underline">
-          <span>GitHub</span> <ExternalLink class="w-3 h-3" />
+      <div class="rs-contact font-sans flex flex-wrap gap-x-4 gap-y-1 mt-2">
+        <span v-if="profile.phone" class="inline-flex items-center gap-1"><Phone class="rs-icon" /> {{ profile.phone }}</span>
+        <span v-if="profile.email" class="inline-flex items-center gap-1"><Mail class="rs-icon" /> {{ profile.email }}</span>
+        <span v-if="profile.location" class="inline-flex items-center gap-1"><MapPin class="rs-icon" /> {{ profile.location }}</span>
+        <span v-if="profile.workYears" class="inline-flex items-center gap-1"><Briefcase class="rs-icon" /> {{ profile.workYears }}</span>
+        <span v-if="showSalary" class="inline-flex items-center gap-1"><Wallet class="rs-icon" /> {{ profile.salaryExpectation }}</span>
+        <a v-if="githubUrl" :href="githubUrl" target="_blank" rel="noopener noreferrer" class="rs-link inline-flex items-center gap-1">
+          <Github class="rs-icon" /> GitHub
         </a>
-        <a v-if="websiteUrl" :href="websiteUrl" target="_blank" rel="noopener noreferrer" class="flex items-center gap-0.5 text-slate-700 underline">
-          <span>Blog</span> <ExternalLink class="w-3 h-3" />
+        <a v-if="websiteUrl" :href="websiteUrl" target="_blank" rel="noopener noreferrer" class="rs-link inline-flex items-center gap-1">
+          <Globe class="rs-icon" /> {{ labels.portfolio }} <ExternalLink class="rs-icon" />
         </a>
       </div>
 
-      <p v-if="profile.summary" class="text-xs text-slate-600 font-sans mt-2">
-        // {{ profile.summary }}
-      </p>
+      <p v-if="profile.summary" class="rs-summary font-sans mt-2">// {{ profile.summary }}</p>
     </div>
 
     <!-- 动态模块 -->
     <div class="geek-body font-sans">
       <template v-for="modKey in modulesOrder" :key="modKey">
-        <!-- 技能模块置前或按序 -->
-        <section v-if="modKey === 'skills' && modules.skills.visible && modules.skills.items.length" :style="sectionMarginStyle">
-          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 font-mono flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full" :style="{ background: theme.themeColor }"></span>
-            # SKILLS & STACK
+        <!-- 技能 -->
+        <section v-if="modKey === 'skills' && modules.skills.visible && modules.skills.items.length" class="rs-section">
+          <h2 class="rs-section-title rs-section-title--plain flex items-center gap-1.5 font-mono border-b-0 pb-0">
+            <span class="inline-block rounded-full" :style="{ width: '0.5em', height: '0.5em', background: theme.themeColor }"></span>
+            {{ titleOf('skills', modules.skills.title) }}
+            <span class="rs-meta font-normal">#{{ sectionLabels.skills }}</span>
           </h2>
-          <div class="flex flex-wrap gap-1.5 mb-2">
-            <span v-for="(skill, idx) in modules.skills.items" :key="idx"
-                  class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200">
+          <!-- 极客模板默认标签；用户切成整句时改为逐行，避免长句挤在胶囊里 -->
+          <div v-if="!isSentenceSkills" class="flex flex-wrap gap-1.5">
+            <span
+              v-for="(skill, idx) in modules.skills.items"
+              :key="idx"
+              class="rs-skill-tag"
+              :class="{ 'rs-skill-tag--accent': theme.showBorder }"
+            >
               {{ skill }}
             </span>
           </div>
+          <ul v-else class="rs-list list-disc list-inside flex flex-col gap-1">
+            <li v-for="(skill, idx) in modules.skills.items" :key="idx" class="rs-item">{{ skill }}</li>
+          </ul>
         </section>
 
         <!-- 工作经历 -->
-        <section v-if="modKey === 'work' && modules.work.visible && modules.work.items.length" :style="sectionMarginStyle">
-          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 font-mono flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full" :style="{ background: theme.themeColor }"></span>
-            # EXPERIENCE
+        <section v-if="modKey === 'work' && modules.work.visible && modules.work.items.length" class="rs-section">
+          <h2 class="rs-section-title rs-section-title--plain flex items-center gap-1.5 font-mono border-b-0 pb-0">
+            <span class="inline-block rounded-full" :style="{ width: '0.5em', height: '0.5em', background: theme.themeColor }"></span>
+            {{ titleOf('work', modules.work.title) }}
+            <span class="rs-meta font-normal">#{{ sectionLabels.work }}</span>
           </h2>
-          <div class="space-y-3">
-            <div v-for="item in modules.work.items" :key="item.id" class="resume-section-item">
-              <div class="flex justify-between items-baseline">
-                <span class="font-bold text-slate-900 text-xs">{{ item.company }} <span class="font-normal text-slate-500">/ {{ item.position }}</span></span>
-                <span class="text-xs font-mono text-slate-500">{{ item.startDate }} ~ {{ item.endDate }}</span>
+          <div class="flex flex-col gap-3">
+            <div v-for="item in modules.work.items" :key="item.id" class="rs-item">
+              <div class="flex justify-between items-baseline gap-3">
+                <span class="rs-item-title">
+                  {{ item.company }}
+                  <span class="font-normal rs-meta">/ {{ item.position }}</span>
+                </span>
+                <span class="rs-meta font-mono whitespace-nowrap">{{ formatDateRange(item.startDate, item.endDate, locale) }}</span>
               </div>
-              <p class="text-xs text-slate-600 whitespace-pre-line leading-relaxed mt-1" :style="paragraphMarginStyle">
-                {{ item.description }}
-              </p>
+              <p class="rs-body mt-1">{{ item.description }}</p>
             </div>
           </div>
         </section>
 
         <!-- 项目经历 -->
-        <section v-if="modKey === 'projects' && modules.projects.visible && modules.projects.items.length" :style="sectionMarginStyle">
-          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 font-mono flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full" :style="{ background: theme.themeColor }"></span>
-            # PROJECTS
+        <section v-if="modKey === 'projects' && modules.projects.visible && modules.projects.items.length" class="rs-section">
+          <h2 class="rs-section-title rs-section-title--plain flex items-center gap-1.5 font-mono border-b-0 pb-0">
+            <span class="inline-block rounded-full" :style="{ width: '0.5em', height: '0.5em', background: theme.themeColor }"></span>
+            {{ titleOf('projects', modules.projects.title) }}
+            <span class="rs-meta font-normal">#{{ sectionLabels.projects }}</span>
           </h2>
-          <div class="space-y-3">
-            <div v-for="item in modules.projects.items" :key="item.id" class="resume-section-item">
-              <div class="flex justify-between items-baseline">
-                <span class="font-bold text-slate-900 text-xs">
+          <div class="flex flex-col gap-3">
+            <div v-for="item in modules.projects.items" :key="item.id" class="rs-item">
+              <div class="flex justify-between items-baseline gap-3">
+                <span class="rs-item-title">
                   {{ item.name }}
-                  <span v-if="item.role" class="text-xs font-normal text-slate-500">({{ item.role }})</span>
+                  <span v-if="item.role" class="font-normal rs-meta">{{ wrapParen(item.role, locale) }}</span>
                 </span>
-                <span class="text-xs font-mono text-slate-500">{{ item.startDate }} ~ {{ item.endDate }}</span>
+                <span class="rs-meta font-mono whitespace-nowrap">{{ formatDateRange(item.startDate, item.endDate, locale) }}</span>
               </div>
-              <p class="text-xs text-slate-600 whitespace-pre-line leading-relaxed mt-1" :style="paragraphMarginStyle">
-                {{ item.description }}
-              </p>
+              <p class="rs-body mt-1">{{ item.description }}</p>
             </div>
           </div>
         </section>
 
         <!-- 教育背景 -->
-        <section v-if="modKey === 'education' && modules.education.visible && modules.education.items.length" :style="sectionMarginStyle">
-          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 font-mono flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full" :style="{ background: theme.themeColor }"></span>
-            # EDUCATION
+        <section v-if="modKey === 'education' && modules.education.visible && modules.education.items.length" class="rs-section">
+          <h2 class="rs-section-title rs-section-title--plain flex items-center gap-1.5 font-mono border-b-0 pb-0">
+            <span class="inline-block rounded-full" :style="{ width: '0.5em', height: '0.5em', background: theme.themeColor }"></span>
+            {{ titleOf('education', modules.education.title) }}
+            <span class="rs-meta font-normal">#{{ sectionLabels.education }}</span>
           </h2>
-          <div class="space-y-1.5">
-            <div v-for="item in modules.education.items" :key="item.id" class="resume-section-item flex justify-between text-xs">
-              <span><strong>{{ item.school }}</strong> · {{ item.major }} ({{ item.degree }})</span>
-              <span class="font-mono text-slate-500">{{ item.startDate }} ~ {{ item.endDate }}</span>
+          <div class="flex flex-col gap-1.5">
+            <div v-for="item in modules.education.items" :key="item.id" class="rs-item flex justify-between gap-3">
+              <span class="rs-body"><strong>{{ item.school }}</strong><template v-if="item.major"> · {{ item.major }}</template><template v-if="item.degree">{{ wrapParen(item.degree, locale) }}</template></span>
+              <span class="rs-meta font-mono whitespace-nowrap">{{ formatDateRange(item.startDate, item.endDate, locale) }}</span>
             </div>
           </div>
         </section>
 
         <!-- 自定义模块 -->
-        <section v-if="modKey === 'custom' && modules.custom.visible && modules.custom.items.length" :style="sectionMarginStyle">
-          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 font-mono flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full" :style="{ background: theme.themeColor }"></span>
-            # {{ modules.custom.title.toUpperCase() }}
+        <section v-if="modKey === 'custom' && modules.custom.visible && modules.custom.items.length" class="rs-section">
+          <h2 class="rs-section-title rs-section-title--plain flex items-center gap-1.5 font-mono border-b-0 pb-0">
+            <span class="inline-block rounded-full" :style="{ width: '0.5em', height: '0.5em', background: theme.themeColor }"></span>
+            {{ titleOf('custom', modules.custom.title) }}
+            <span class="rs-meta font-normal">#{{ sectionLabels.custom }}</span>
           </h2>
-          <ul class="list-disc list-inside text-xs text-slate-600 space-y-1">
-            <li v-for="(item, idx) in modules.custom.items" :key="idx" class="resume-section-item">
-              {{ item }}
-            </li>
+          <ul class="rs-list list-disc list-inside flex flex-col gap-1">
+            <li v-for="(item, idx) in modules.custom.items" :key="idx" class="rs-item">{{ item }}</li>
           </ul>
         </section>
       </template>

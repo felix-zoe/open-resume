@@ -6,6 +6,7 @@ import PreviewCanvas from '../../src/modules/editor/PreviewCanvas.vue';
 import { useResumeStore } from '../../src/stores/resume';
 import ModernTemplate from '../../src/templates/ModernTemplate.vue';
 import { DEFAULT_RESUME_CONTENT, DEFAULT_THEME_CONFIG } from '../../src/utils/presets';
+import { A4_HEIGHT_PX, MM_TO_PX, getUsableHeight } from '../../src/utils/a4';
 
 /** jsdom 不做布局，scrollHeight 恒为 0；这里按用例注入内容高度 */
 function stubContentHeight(wrapper: ReturnType<typeof mount>, height: number) {
@@ -27,6 +28,12 @@ async function mountAndMeasure(height: number) {
   return wrapper;
 }
 
+/** 从 `top: 1122.52px;` 里取出数值 */
+function topOf(style: string | undefined): number {
+  const match = /top:\s*([\d.]+)px/.exec(style ?? '');
+  return match ? Number(match[1]) : Number.NaN;
+}
+
 describe('PreviewCanvas 分页测量', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -39,12 +46,16 @@ describe('PreviewCanvas 分页测量', () => {
     expect(wrapper.text()).toContain('当前约 1 页');
   });
 
-  it('内容 1300px 时显示 2 页，断线在 A4 底部', async () => {
+  it('内容超过一页时显示 2 页，断线落在纸张底部', async () => {
     const wrapper = await mountAndMeasure(1300);
 
     const lines = wrapper.findAll('.page-indicator-line');
     expect(lines).toHaveLength(1);
-    expect(lines[0].attributes('style')).toContain('1122.52px');
+
+    // 断线标的是“本页内容到此为止”，因此落在下边距的上沿：
+    // 纸张高度 - 下页边距。它不该压到纸张物理底部。
+    const bottomPadding = DEFAULT_THEME_CONFIG.pagePadding * MM_TO_PX;
+    expect(topOf(lines[0].attributes('style'))).toBeCloseTo(A4_HEIGHT_PX - bottomPadding, 1);
     expect(wrapper.text()).toContain('当前约 2 页');
   });
 
@@ -55,6 +66,35 @@ describe('PreviewCanvas 分页测量', () => {
     // 纸张 scrollHeight 保持 jsdom 默认 0，若组件错误地测量纸张会得到 1 页
     Object.defineProperty(paper, 'scrollHeight', { configurable: true, value: 1123 });
     expect(wrapper.findAll('.page-indicator-line')).toHaveLength(1);
+  });
+
+  it('页边距由纸张承担，分页后每页都有留白', async () => {
+    const wrapper = await mountAndMeasure(500);
+    const paper = wrapper.find('.a4-print-target').element as HTMLElement;
+
+    // Vue 会把四个等值的 padding-* 合并成 `padding` 简写，因此读计算后的值
+    const expected = DEFAULT_THEME_CONFIG.pagePadding * MM_TO_PX;
+    expect(parseFloat(paper.style.paddingTop || paper.style.padding)).toBeCloseTo(expected, 1);
+    expect(parseFloat(paper.style.paddingBottom || paper.style.padding)).toBeCloseTo(expected, 1);
+  });
+
+  it('页数按扣除页边距后的可用高度计算，与打印保持一致', async () => {
+    const usable = getUsableHeight(DEFAULT_THEME_CONFIG.pagePadding);
+    // 刚好超过可用高度一点，应判定为 2 页
+    const wrapper = await mountAndMeasure(usable + 1);
+
+    expect(wrapper.text()).toContain('当前约 2 页');
+  });
+
+  it('Modern 模板由栏位自己承担页边距，纸张不重复加 padding', async () => {
+    const wrapper = mount(PreviewCanvas, { global: { plugins: [createPinia()] } });
+    const store = useResumeStore();
+    store.templateId = 'modern';
+    await nextTick();
+    await nextTick();
+
+    const style = wrapper.find('.a4-print-target').attributes('style') ?? '';
+    expect(style).not.toContain('padding-top');
   });
 });
 
