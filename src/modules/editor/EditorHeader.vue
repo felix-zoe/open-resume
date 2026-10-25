@@ -2,8 +2,14 @@
 import { ref } from 'vue';
 import { useResumeStore } from '../../stores/resume';
 import { useAuthStore } from '../../stores/auth';
-import { triggerPrintPdf } from '../../utils/exportPdf';
+import { checkResumeContent } from '../../utils/validation';
 import AuthModal from '../../components/AuthModal.vue';
+import ShareDialog from '../../components/share/ShareDialog.vue';
+import VersionDrawer from '../../components/editor/VersionDrawer.vue';
+import ExportDialog from '../../components/editor/ExportDialog.vue';
+import ImportDialog from '../../components/editor/ImportDialog.vue';
+import ContentCheckPanel from '../../components/editor/ContentCheckPanel.vue';
+import AiRewriteDrawer from '../../components/editor/AiRewriteDrawer.vue';
 import { AppButton, AppMenu, BrandMark } from '../../components/ui';
 import {
   Download,
@@ -20,7 +26,11 @@ import {
   CloudUpload,
   Sparkles,
   Target,
-  MoreHorizontal
+  MoreHorizontal,
+  History,
+  FileUp,
+  ListChecks,
+  Wand2
 } from 'lucide-vue-next';
 
 const emit = defineEmits<{
@@ -33,22 +43,37 @@ const resumeStore = useResumeStore();
 const authStore = useAuthStore();
 const isEditingTitle = ref(false);
 const isAuthModalOpen = ref(false);
-const isPrinting = ref(false);
+const isShareDialogOpen = ref(false);
+const isVersionDrawerOpen = ref(false);
+const isExportDialogOpen = ref(false);
+const isImportDialogOpen = ref(false);
+const isContentCheckOpen = ref(false);
+const isAiRewriteOpen = ref(false);
 const autoFitToast = ref<string | null>(null);
 /** 小屏下把次要操作收进「更多」菜单 */
 const isMoreMenuOpen = ref(false);
 
-function runFromMenu(action: () => void) {
+function runFromMenu(action: () => void | Promise<void>) {
   isMoreMenuOpen.value = false;
-  action();
+  void action();
 }
 
-const handleAutoFit = () => {
-  const res = resumeStore.autoFitOnePage();
-  autoFitToast.value = res.message;
+const handleAutoFit = async () => {
+  const res = await resumeStore.autoFitOnePage();
+  autoFitToast.value = res.success
+    ? res.message
+    : `${res.message}（可点击「撤销排版」恢复原样）`;
   setTimeout(() => {
     autoFitToast.value = null;
-  }, 3500);
+  }, res.success ? 3500 : 6000);
+};
+
+const handleUndoAutoFit = () => {
+  const restored = resumeStore.undoAutoFit();
+  autoFitToast.value = restored ? '已撤销本次自动排版' : '没有可撤销的自动排版';
+  setTimeout(() => {
+    autoFitToast.value = null;
+  }, 3000);
 };
 
 /** demo 与本地草稿只存在于当前浏览器，生成分享链接会让 HR 看到示例数据 */
@@ -70,33 +95,61 @@ const handleShare = async () => {
     return;
   }
 
-  const shareUrl = `${window.location.origin}/share/${resumeStore.id}`;
-  try {
-    await navigator.clipboard.writeText(shareUrl);
-    autoFitToast.value = `分享链接已复制：${shareUrl}`;
-  } catch {
-    autoFitToast.value = `分享链接：${shareUrl}`;
-  }
-  setTimeout(() => {
-    autoFitToast.value = null;
-  }, 5000);
+  isShareDialogOpen.value = true;
 };
 
-const handleExport = async () => {
-  if (isPrinting.value) return;
-  isPrinting.value = true;
-  try {
-    await triggerPrintPdf(resumeStore.title);
-    autoFitToast.value = '已打开打印对话框，选择「另存为 PDF」即可保存';
-  } catch (err) {
-    console.error(err);
-    autoFitToast.value = '打印对话框未能打开，请检查浏览器权限';
-  } finally {
-    isPrinting.value = false;
+/** 版本历史：与分享一样，本地草稿没有云端版本 */
+const handleVersions = () => {
+  if (!isShareable()) {
+    autoFitToast.value = authStore.isLoggedIn
+      ? '本地草稿没有云端版本历史，请先保存到云端'
+      : '版本历史需要登录后使用';
     setTimeout(() => {
       autoFitToast.value = null;
     }, 4000);
+    return;
   }
+  isVersionDrawerOpen.value = true;
+};
+
+/** 恢复版本后把内容推回 store，同时清空撤销栈由父级决定 */
+const handleVersionRestored = (payload: {
+  title: string;
+  templateId: string;
+  content: any;
+  themeConfig: any;
+}) => {
+  resumeStore.loadResumeData({
+    id: resumeStore.id,
+    title: payload.title,
+    templateId: payload.templateId,
+    content: payload.content,
+    themeConfig: payload.themeConfig
+  });
+  isVersionDrawerOpen.value = false;
+};
+
+/**
+ * 导出前的内容体检。
+ *
+ * 只提示、不拦截：用户比任何启发式规则都清楚这份简历能不能投。
+ * 提示优先展示 error，没有 error 时展示第一条 warning（通常是占位符残留）。
+ * 真正的格式选择交给 ExportDialog —— 这里只负责「体检 + 打开弹窗」。
+ */
+const handleExport = () => {
+  const issues = checkResumeContent(resumeStore.content);
+  const blocking = issues.filter((issue) => issue.severity === 'error');
+  const preview = blocking[0] ?? issues.find((issue) => issue.severity === 'warning');
+  if (preview) {
+    autoFitToast.value = blocking.length
+      ? `导出前提醒：${preview.message}${blocking.length > 1 ? `（共 ${blocking.length} 项）` : ''}`
+      : `导出前提醒：${preview.message}`;
+    setTimeout(() => {
+      autoFitToast.value = null;
+    }, 4500);
+  }
+
+  isExportDialogOpen.value = true;
 };
 
 const handleZoomIn = () => {
@@ -116,7 +169,15 @@ const handleZoomReset = () => {
   <header class="no-print h-14 bg-white border-b border-slate-200 px-2 sm:px-4 flex items-center justify-between gap-2 shadow-xs z-20 sticky top-0">
     <!-- 左侧：返回、标题与状态 -->
     <div class="flex items-center gap-2 sm:gap-3 min-w-0">
-      <router-link to="/" class="flex items-center gap-1.5 font-bold text-primary-600 hover:opacity-80 transition text-sm">
+      <!--
+        返回目标随登录态变化：登录用户的「上一级」是工作台（那里能管理多份简历），
+        游客没有工作台，只能回首页。始终回首页会让登录用户多绕一步。
+      -->
+      <router-link
+        :to="authStore.isLoggedIn ? '/dashboard' : '/'"
+        class="flex items-center gap-1.5 font-bold text-primary-600 hover:opacity-80 transition text-sm"
+        :title="authStore.isLoggedIn ? '返回我的简历' : '返回首页'"
+      >
         <BrandMark size="sm" />
         <span class="hidden sm:inline">OpenResume</span>
       </router-link>
@@ -133,14 +194,15 @@ const handleZoomReset = () => {
           class="text-xs sm:text-sm font-semibold text-slate-800 border-b border-primary-500 bg-primary-50/50 px-1 py-0.5 outline-none focus:ring-0"
           auto-focus
         />
-        <h2
+        <!-- 编辑器页面的唯一 h1：简历标题本身就是这一页的主标题 -->
+        <h1
           v-else
           @click="isEditingTitle = true"
           title="点击重命名"
           class="text-xs sm:text-sm font-semibold text-slate-800 cursor-pointer hover:bg-slate-100 px-2 py-1 rounded transition max-w-[130px] sm:max-w-xs truncate"
         >
           {{ resumeStore.title }}
-        </h2>
+        </h1>
 
         <!-- 保存状态指示 -->
         <div class="hidden md:flex items-center gap-1 text-2xs text-slate-500 ml-2">
@@ -198,21 +260,31 @@ const handleZoomReset = () => {
         <span class="hidden sm:inline">切换模板</span>
       </button>
 
-      <!-- 智能一键卡页神器 -->
+      <!-- 自动排版：迭代收敛到目标页数 -->
       <button
         @click="handleAutoFit"
-        title="算法自动解算最佳间距与字号，完美将内容收敛至单页 A4"
-        class="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary-200 px-2.5 py-1.5 rounded-lg transition shadow-2xs group"
+        title="自动调整间距与字号，将内容收敛到单页 A4"
+        class="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary-200 px-2.5 py-1.5 rounded-lg transition shadow-xs group"
       >
         <Sparkles class="w-3.5 h-3.5 text-primary-600 group-hover:rotate-12 transition transform" />
         <span>一键单页</span>
       </button>
 
-      <!-- 目标岗位 JD 诊断 -->
+      <button
+        v-if="resumeStore.canUndoAutoFit"
+        @click="handleUndoAutoFit"
+        title="撤销最近一次自动排版"
+        class="hidden md:inline-flex items-center gap-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded-lg transition"
+      >
+        <RotateCcw class="w-3.5 h-3.5 text-slate-500" />
+        <span>撤销排版</span>
+      </button>
+
+      <!-- 目标岗位 JD 关键词对照 -->
       <button
         @click="$emit('toggleAtsModal')"
-        title="根据招聘要求诊断关键词命中率与 ATS 评分"
-        class="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary-200 px-2.5 py-1.5 rounded-lg transition shadow-2xs group cursor-pointer"
+        title="对照招聘要求检查关键词覆盖情况（本地计算，仅供参考）"
+        class="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary-200 px-2.5 py-1.5 rounded-lg transition shadow-xs group cursor-pointer"
       >
         <Target class="w-3.5 h-3.5 text-primary-600 group-hover:scale-110 transition transform" />
         <span class="hidden sm:inline">岗位诊断</span>
@@ -224,6 +296,30 @@ const handleZoomReset = () => {
       >
         <Palette class="w-3.5 h-3.5 text-slate-500" />
         <span>排版设置</span>
+      </button>
+
+      <!--
+        AI 改写：标签只在足够宽时才出现。
+        编辑器顶栏在 md 断点已经排了七八个按钮，再加一个带文字的必然溢出，
+        而这段宽度又看不到「更多」菜单（那是 md:hidden），所以保留图标本身。
+      -->
+      <button
+        @click="isAiRewriteOpen = true"
+        aria-label="AI 改写"
+        title="用你自己的模型改写某一段描述（会显示改动对照）"
+        class="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary-200 px-2.5 py-1.5 rounded-lg transition shadow-xs group"
+      >
+        <Wand2 class="w-3.5 h-3.5 text-primary-600 group-hover:rotate-12 transition transform" aria-hidden="true" />
+        <span class="hidden xl:inline">AI 改写</span>
+      </button>
+
+      <button
+        @click="handleVersions"
+        title="查看与恢复历史版本"
+        class="hidden lg:inline-flex items-center gap-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded-lg transition"
+      >
+        <History class="w-3.5 h-3.5 text-slate-500" />
+        <span>版本</span>
       </button>
 
       <button
@@ -303,10 +399,46 @@ const handleZoomReset = () => {
           type="button"
           role="menuitem"
           class="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+          @click="runFromMenu(handleVersions)"
+        >
+          <History class="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
+          <span>版本历史</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
           @click="runFromMenu(handleShare)"
         >
           <Share2 class="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
           <span>分享</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+          @click="runFromMenu(() => { isContentCheckOpen = true; })"
+        >
+          <ListChecks class="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
+          <span>内容检查</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+          @click="runFromMenu(() => { isAiRewriteOpen = true; })"
+        >
+          <Wand2 class="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
+          <span>AI 改写</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+          @click="runFromMenu(() => { isImportDialogOpen = true; })"
+        >
+          <FileUp class="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
+          <span>导入简历</span>
         </button>
         <button
           type="button"
@@ -319,12 +451,12 @@ const handleZoomReset = () => {
         </button>
       </AppMenu>
 
-      <!-- 核心导出 PDF 按钮 -->
-      <AppButton size="sm" :loading="isPrinting" aria-label="导出 PDF" @click="handleExport">
+      <!-- 导出入口：格式选择（PDF / Word / Markdown / JSON）在弹窗里 -->
+      <AppButton size="sm" aria-label="导出简历" @click="handleExport">
         <template #icon>
           <Download class="w-4 h-4" aria-hidden="true" />
         </template>
-        <span class="hidden sm:inline">{{ isPrinting ? '准备中...' : '导出 PDF' }}</span>
+        <span class="hidden sm:inline">导出</span>
       </AppButton>
     </div>
 
@@ -334,6 +466,38 @@ const handleZoomReset = () => {
       @close="isAuthModalOpen = false"
       @success="resumeStore.saveResume"
     />
+
+    <!-- 分享设置：token 化链接、有效期、密码、二维码 -->
+    <ShareDialog
+      v-if="isShareable()"
+      :open="isShareDialogOpen"
+      :resume-id="resumeStore.id"
+      :resume-title="resumeStore.title"
+      :is-public="resumeStore.isPublic"
+      @update:open="isShareDialogOpen = $event"
+      @update:is-public="resumeStore.isPublic = $event"
+    />
+
+    <!-- 版本历史 -->
+    <VersionDrawer
+      v-if="isShareable()"
+      :open="isVersionDrawerOpen"
+      :resume-id="resumeStore.id"
+      @update:open="isVersionDrawerOpen = $event"
+      @restored="handleVersionRestored"
+    />
+
+    <!-- 导出：PDF / Word / Markdown / JSON -->
+    <ExportDialog :is-open="isExportDialogOpen" @close="isExportDialogOpen = false" />
+
+    <!-- 导入：JSON 备份 / 粘贴文本 / Markdown -->
+    <ImportDialog :is-open="isImportDialogOpen" @close="isImportDialogOpen = false" />
+
+    <!-- 内容检查：逐条 bullet 的量化/动词/长度/占位符 -->
+    <ContentCheckPanel v-model:open="isContentCheckOpen" />
+
+    <!-- AI 改写：自带 Key，结果必须过 diff 才会写回正文 -->
+    <AiRewriteDrawer v-model:open="isAiRewriteOpen" />
 
     <!-- 智能卡页 Toast 提示浮层 -->
     <transition
