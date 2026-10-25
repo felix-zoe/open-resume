@@ -171,3 +171,86 @@ test.describe('share page @s0', () => {
     await expect(page.getByText('该简历暂未开启公开分享，请联系求职者开启后查阅')).toBeVisible();
   });
 });
+
+test.describe('token 分享链接 @s1', () => {
+  test('有效 token 渲染简历并默认脱敏联系方式 @s1', async ({ page, mockApi }) => {
+    const record = mockApi.seed({ id: 'res_token', isPublic: 1 });
+    const link = mockApi.seedShareLink('res_token', { token: 'tokvalid234', maskContact: true });
+
+    await page.goto(`/s/${link.token}`);
+
+    await expect(page.locator('.resume-doc')).toBeVisible();
+    // DEMO_CONTENT 的 phone 为 138 0013 8000，email 为 xiaofan.zhang@example.com
+    await expect(page.getByText('138****8000')).toBeVisible();
+    await expect(page.getByText('x***@example.com')).toBeVisible();
+    // 完整号码不得出现在页面上
+    await expect(page.getByText('138 0013 8000')).toHaveCount(0);
+    expect(record.id).toBe('res_token');
+  });
+
+  test('关闭脱敏后展示完整联系方式 @s1', async ({ page, mockApi }) => {
+    mockApi.seed({ id: 'res_token2', isPublic: 1 });
+    const link = mockApi.seedShareLink('res_token2', { token: 'tokopen234', maskContact: false });
+
+    await page.goto(`/s/${link.token}`);
+    await expect(page.locator('.resume-doc')).toBeVisible();
+    await expect(page.getByText('138 0013 8000')).toBeVisible();
+    await expect(page.getByText('xiaofan.zhang@example.com')).toBeVisible();
+  });
+
+  test('需要密码：先显示密码框，错误密码报错，正确密码后渲染 @s1', async ({ page, mockApi }) => {
+    mockApi.seed({ id: 'res_pwd', isPublic: 1 });
+    const link = mockApi.seedShareLink('res_pwd', {
+      token: 'tokpwd2345',
+      hasPassword: true,
+      password: 'secret123'
+    });
+
+    await page.goto(`/s/${link.token}`);
+    await expect(page.getByText('这份简历需要访问密码')).toBeVisible();
+    // 未解锁前不得渲染简历
+    await expect(page.locator('.resume-doc')).toHaveCount(0);
+
+    await page.getByLabel('访问密码').fill('wrong');
+    await page.getByRole('button', { name: '查看简历' }).click();
+    await expect(page.getByText('访问密码不正确')).toBeVisible();
+
+    await page.getByLabel('访问密码').fill('secret123');
+    await page.getByRole('button', { name: '查看简历' }).click();
+    await expect(page.locator('.resume-doc')).toBeVisible();
+  });
+
+  test('已撤销的 token 展示失效提示 @s1', async ({ page, mockApi }) => {
+    mockApi.seed({ id: 'res_revoked', isPublic: 1 });
+    mockApi.seedShareLink('res_revoked', {
+      token: 'tokrevoked2',
+      revokedAt: Math.floor(Date.now() / 1000) - 10,
+      status: 'revoked'
+    });
+
+    await page.goto('/s/tokrevoked2');
+    await expect(page.getByText(/该分享链接已失效/)).toBeVisible();
+    await expect(page.locator('.resume-doc')).toHaveCount(0);
+  });
+
+  test('已过期的 token 展示过期提示 @s1', async ({ page, mockApi }) => {
+    mockApi.seed({ id: 'res_expired', isPublic: 1 });
+    mockApi.seedShareLink('res_expired', {
+      token: 'tokexpired2',
+      expiresAt: Math.floor(Date.now() / 1000) - 60,
+      status: 'expired'
+    });
+
+    await page.goto('/s/tokexpired2');
+    await expect(page.getByText(/该分享链接已过期/)).toBeVisible();
+  });
+
+  test('禁止下载时不显示「另存为 PDF」 @s1', async ({ page, mockApi }) => {
+    mockApi.seed({ id: 'res_nodl', isPublic: 1 });
+    const link = mockApi.seedShareLink('res_nodl', { token: 'toknodl2345', allowDownload: false });
+
+    await page.goto(`/s/${link.token}`);
+    await expect(page.locator('.resume-doc')).toBeVisible();
+    await expect(page.getByRole('button', { name: '另存为 PDF' })).toHaveCount(0);
+  });
+});
