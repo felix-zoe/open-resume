@@ -25,6 +25,10 @@ blob-report
 .dev.vars
 .dev.vars.*
 
+# 但要保留模板文件：README 引用它，克隆下来得看得见。
+# 负向规则必须写在忽略规则之后才生效。
+!.dev.vars.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
