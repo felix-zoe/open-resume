@@ -1,6 +1,19 @@
 <script setup lang="ts">
+import { onMounted } from 'vue';
 import ToastHost from './components/ui/ToastHost.vue';
 import ConfirmHost from './components/ui/ConfirmHost.vue';
+import ChoiceHost from './components/ui/ChoiceHost.vue';
+import PwaPrompt from './components/PwaPrompt.vue';
+import { initPwa } from './composables/usePwa';
+
+/**
+ * 只注册一次 SW。放在 App 而不是 main：`virtual:pwa-register` 是构建期
+ * 由插件生成的虚拟模块，放在入口会让开发期的 main.ts 依赖一个不存在的模块
+ * （`devOptions.enabled` 为 false 时插件不提供它）。
+ */
+onMounted(() => {
+  if (import.meta.env.PROD) void initPwa();
+});
 </script>
 
 <template>
@@ -18,5 +31,9 @@ import ConfirmHost from './components/ui/ConfirmHost.vue';
     <!-- 全局反馈层：任意组件通过 useToast / askConfirm 调用 -->
     <ToastHost />
     <ConfirmHost />
+    <ChoiceHost />
+
+    <!-- PWA：新版本 / 离线就绪 / 安装引导 -->
+    <PwaPrompt />
   </div>
 </template>
