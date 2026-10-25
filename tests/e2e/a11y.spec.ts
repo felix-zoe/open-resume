@@ -69,6 +69,20 @@ test.describe('可访问性 @s1', () => {
     expect(violations, describeViolations(violations)).toHaveLength(0);
   });
 
+  test('简历示例页无 serious/critical 问题 @s1', async ({ page }) => {
+    await page.goto('/examples');
+    await page.locator('main h1').first().waitFor();
+    const violations = blockingViolations(await scan(page));
+    expect(violations, describeViolations(violations)).toHaveLength(0);
+  });
+
+  test('示例详情页无 serious/critical 问题 @s1', async ({ page }) => {
+    await page.goto('/examples/frontend');
+    await page.locator('main h1').first().waitFor();
+    const violations = blockingViolations(await scan(page));
+    expect(violations, describeViolations(violations)).toHaveLength(0);
+  });
+
   test('分享页无 serious/critical 问题 @s1', async ({ page, mockApi }) => {
     mockApi.seed({ id: 'demo', title: '分享页简历', isPublic: 1 });
     await page.goto('/share/demo');

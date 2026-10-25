@@ -3,12 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- iOS 不读 manifest 里的 icons，必须单独声明；否则「添加到主屏」会是灰色方块 -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="OpenResume" />
 
     <title>OpenResume - 极简智能简历制作平台</title>
     <meta
       name="description"
-      content="开源免费的在线简历制作平台：真实 A4 排版、三套专业模板、一键收敛单页、浏览器原生打印导出 PDF，无需注册即可开始。"
+      content="开源免费的在线简历制作平台：真实 A4 排版、四套专业模板、一键收敛单页、浏览器原生打印导出 PDF，无需注册即可开始。"
     />
     <meta name="theme-color" content="#2563eb" />
     <link rel="canonical" href="https://open-resume.pages.dev/" />
@@ -18,15 +22,18 @@
     <meta property="og:title" content="OpenResume - 极简智能简历制作平台" />
     <meta
       property="og:description"
-      content="开源免费的在线简历制作平台：真实 A4 排版、三套专业模板、一键收敛单页、浏览器原生打印导出 PDF。"
+      content="开源免费的在线简历制作平台：真实 A4 排版、四套专业模板、一键收敛单页、浏览器原生打印导出 PDF。"
     />
     <meta property="og:url" content="https://open-resume.pages.dev/" />
-    <meta property="og:image" content="https://open-resume.pages.dev/favicon.svg" />
+    <meta property="og:image" content="https://open-resume.pages.dev/og-default.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta property="og:locale" content="zh_CN" />
 
-    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="OpenResume - 极简智能简历制作平台" />
     <meta name="twitter:description" content="开源免费的在线简历制作平台，真实 A4 排版与原生打印导出 PDF。" />
+    <meta name="twitter:image" content="https://open-resume.pages.dev/og-default.png" />
   </head>
   <body class="bg-slate-50 text-slate-900 font-sans antialiased min-h-screen">
     <div id="app"></div>

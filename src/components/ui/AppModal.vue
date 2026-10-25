@@ -125,7 +125,7 @@ onBeforeUnmount(() => {
     >
       <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center p-4 no-print">
         <div
-          class="absolute inset-0 bg-slate-900/50 backdrop-blur-2xs"
+          class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
           aria-hidden="true"
           @click="closeOnOverlay && close()"
         />

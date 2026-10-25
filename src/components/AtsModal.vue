@@ -7,7 +7,6 @@ import {
   Sparkles,
   CheckCircle2,
   AlertTriangle,
-  Plus,
   ArrowRight,
   TrendingUp,
   BarChart3,
@@ -57,19 +56,17 @@ const handleAnalyze = () => {
   }, 300);
 };
 
-const addMissingSkill = (skill: string) => {
-  if (!resumeStore.content.modules.skills.items.includes(skill)) {
-    resumeStore.content.modules.skills.items.push(skill);
-    resumeStore.content.modules.skills.visible = true;
-    result.value = analyzeResumeAgainstJd(resumeStore.content, jdText.value);
-  }
-};
-
-/** 分数只用于本地对照，不宣称任何“通过率” */
-const scoreLevel = computed(() => {
+/**
+ * 覆盖度只给「充分 / 部分 / 不足」三档，不折算成百分制分数。
+ *
+ * 分数会让人误以为存在客观的通过标准；三档描述只回答「还差多少关键词」，
+ * 用户能自己决定要不要补。阈值按权重覆盖率（任职要求权重 1、职责 0.5）划分。
+ */
+const coverageLevel = computed(() => {
   if (!result.value) return { text: '', tone: 'neutral' as const };
-  if (result.value.score >= 80) return { text: '关键词覆盖充分', tone: 'success' as const };
-  if (result.value.score >= 60) return { text: '覆盖较好，仍有缺口', tone: 'primary' as const };
+  const ratio = result.value.keywordCoverage.ratio;
+  if (ratio >= 0.8) return { text: '关键词覆盖充分', tone: 'success' as const };
+  if (ratio >= 0.5) return { text: '覆盖部分，仍有缺口', tone: 'primary' as const };
   return { text: '关键词缺口较多', tone: 'warning' as const };
 });
 </script>
@@ -135,13 +132,15 @@ const scoreLevel = computed(() => {
         <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div class="flex items-center gap-4">
             <div class="w-16 h-16 shrink-0 flex flex-col items-center justify-center rounded-xl bg-white border border-slate-200">
-              <span class="text-2xl font-bold font-mono text-slate-900">{{ result.score }}</span>
-              <span class="text-2xs text-slate-500">匹配分</span>
+              <span class="text-2xl font-bold font-mono text-slate-900">
+                {{ Math.round(result.keywordCoverage.ratio * 100) }}%
+              </span>
+              <span class="text-2xs text-slate-500">关键词覆盖</span>
             </div>
             <div>
-              <AppBadge :tone="scoreLevel.tone" size="md">{{ scoreLevel.text }}</AppBadge>
+              <AppBadge :tone="coverageLevel.tone" size="md">{{ coverageLevel.text }}</AppBadge>
               <p class="text-xs text-slate-600 mt-1.5">
-                命中 {{ result.matchedKeywords.length }} 个关键词 · 量化描述占比
+                命中 {{ result.keywordCoverage.matched.length }} 个关键词 · 量化描述占比
                 {{ Math.round(result.metricsDensity.ratio * 100) }}%
               </p>
             </div>
@@ -151,13 +150,13 @@ const scoreLevel = computed(() => {
             <div class="p-2.5 bg-white rounded-lg border border-slate-200 text-center">
               <div class="text-2xs text-slate-500">已命中</div>
               <div class="text-sm font-bold text-success-600 font-mono mt-0.5">
-                {{ result.matchedKeywords.length }} 项
+                {{ result.keywordCoverage.matched.length }} 项
               </div>
             </div>
             <div class="p-2.5 bg-white rounded-lg border border-slate-200 text-center">
               <div class="text-2xs text-slate-500">待补充</div>
               <div class="text-sm font-bold text-danger-600 font-mono mt-0.5">
-                {{ result.missingKeywords.length }} 项
+                {{ result.keywordCoverage.missing.length }} 项
               </div>
             </div>
           </div>
@@ -168,13 +167,13 @@ const scoreLevel = computed(() => {
           <div class="p-3.5 rounded-xl bg-success-50/60 border border-success-100">
             <div class="text-xs font-bold text-success-700 mb-2 flex items-center gap-1.5">
               <CheckCircle2 class="w-4 h-4" aria-hidden="true" />
-              <span>简历中已有 ({{ result.matchedKeywords.length }})</span>
+              <span>简历中已有 ({{ result.keywordCoverage.matched.length }})</span>
             </div>
             <div class="flex flex-wrap gap-1.5">
-              <AppBadge v-for="kw in result.matchedKeywords" :key="kw" tone="success">
+              <AppBadge v-for="kw in result.keywordCoverage.matched" :key="kw" tone="success">
                 {{ kw }}
               </AppBadge>
-              <span v-if="!result.matchedKeywords.length" class="text-xs text-slate-500">
+              <span v-if="!result.keywordCoverage.matched.length" class="text-xs text-slate-500">
                 暂未命中，可按右侧建议补充技能描述
               </span>
             </div>
@@ -184,23 +183,24 @@ const scoreLevel = computed(() => {
             <div class="text-xs font-bold text-danger-700 mb-2 flex items-center justify-between gap-2">
               <span class="flex items-center gap-1.5">
                 <AlertTriangle class="w-4 h-4" aria-hidden="true" />
-                <span>JD 提到但简历缺失 ({{ result.missingKeywords.length }})</span>
+                <span>JD 提到但简历缺失 ({{ result.keywordCoverage.missing.length }})</span>
               </span>
-              <span class="text-2xs text-slate-500 font-normal">点击可加到技能栏</span>
+              <span class="text-2xs text-slate-500 font-normal">按重要度排序</span>
             </div>
             <div class="flex flex-wrap gap-1.5">
-              <button
-                v-for="kw in result.missingKeywords"
+              <!--
+                只展示，不提供「一键写入」：把 JD 里的词直接塞进技能栏，
+                等于让简历替用户说谎，面试时反而暴露短板。是否真的会、要不要写，
+                只能由用户自己判断。
+              -->
+              <AppBadge
+                v-for="kw in result.keywordCoverage.missing"
                 :key="kw"
-                type="button"
-                class="inline-flex items-center gap-1 text-2xs font-medium text-danger-700 bg-white hover:bg-danger-600 hover:text-white border border-danger-200 px-2 py-0.5 rounded-full transition"
-                :aria-label="`将 ${kw} 添加到技能列表`"
-                @click="addMissingSkill(kw)"
+                tone="danger"
               >
-                <span>{{ kw }}</span>
-                <Plus class="w-3 h-3" aria-hidden="true" />
-              </button>
-              <span v-if="!result.missingKeywords.length" class="text-xs text-success-700">
+                {{ kw }}
+              </AppBadge>
+              <span v-if="!result.keywordCoverage.missing.length" class="text-xs text-success-700">
                 该岗位的核心关键词已全部覆盖
               </span>
             </div>
@@ -267,9 +267,12 @@ const scoreLevel = computed(() => {
         </div>
       </div>
 
-      <p class="text-2xs text-slate-500 flex items-center gap-1.5">
-        <FileText class="w-3.5 h-3.5" aria-hidden="true" />
-        <span>本地计算，仅供参考；不构成任何招聘筛选结果的预测。</span>
+      <p class="text-2xs text-slate-500 flex items-start gap-1.5 leading-relaxed">
+        <FileText class="w-3.5 h-3.5 shrink-0 mt-0.5" aria-hidden="true" />
+        <span>
+          基于关键词匹配，仅供参考；不构成任何招聘筛选结果的预测。
+          覆盖度按词频权重计算（任职要求权重 1.0、岗位职责 0.5），同义词已归一。
+        </span>
       </p>
     </div>
 

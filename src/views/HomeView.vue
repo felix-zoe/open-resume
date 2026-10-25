@@ -1,10 +1,19 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import Navbar from '../components/Navbar.vue';
+import AppFooter from '../components/AppFooter.vue';
 import TemplatePreview from '../components/home/TemplatePreview.vue';
-import { AppBadge, AppButton, AppCard, BrandMark } from '../components/ui';
-import { TEMPLATES } from '../constants/templates';
+import { AppBadge, AppButton, AppCard } from '../components/ui';
+import { TEMPLATES, findTemplate } from '../constants/templates';
+import { RESUME_EXAMPLES } from '../constants/examples';
+import {
+  applyPageMeta,
+  faqJsonLd,
+  removeJsonLd,
+  setJsonLd,
+  softwareApplicationJsonLd
+} from '../utils/seo';
 import {
   ArrowRight,
   Check,
@@ -15,8 +24,7 @@ import {
   ShieldCheck,
   Sliders,
   Sparkles,
-  Target,
-  Zap
+  Target
 } from 'lucide-vue-next';
 
 const router = useRouter();
@@ -29,7 +37,7 @@ const startWithTemplate = (templateId: string) => {
 const STEPS = [
   {
     title: '选择模板',
-    desc: '三套针对不同岗位设计的排版，随时可换，内容不受影响。'
+    desc: '四套针对不同岗位设计的排版，随时可换，内容不受影响。'
   },
   {
     title: '填写内容',
@@ -75,26 +83,7 @@ const FEATURES = [
   }
 ];
 
-// 岗位示例
-const ROLE_EXAMPLES = [
-  {
-    role: '研发工程师',
-    templateId: 'geek',
-    points: ['技术栈与项目链接前置', '等宽字体标识，弱化多余边线', '适合 GitHub / 开源经历展示']
-  },
-  {
-    role: '产品 / 运营',
-    templateId: 'modern',
-    points: ['双栏布局突出技能与经历', '适合展示多段跨领域经历', '视觉层次分明，便于快速浏览']
-  },
-  {
-    role: '应届生 / 通用岗',
-    templateId: 'classic',
-    points: ['单栏结构，信息密度均衡', '教育背景与实习经历并列清晰', '适配多数行业的常规筛选']
-  }
-];
-
-const previewTemplateId = (id: string) => id as 'classic' | 'geek' | 'modern';
+const previewTemplateId = (id: string) => id as 'classic' | 'geek' | 'modern' | 'ats';
 
 // FAQ
 const openFaqIndex = ref<number | null>(0);
@@ -121,15 +110,33 @@ const toggleFaq = (index: number) => {
   openFaqIndex.value = openFaqIndex.value === index ? null : index;
 };
 
+/**
+ * 首页的结构化数据：站点能力 + FAQ。
+ * FAQ 用页面上真实展示的同一份数组，避免「结构化数据写了、页面没有」被判定为作弊。
+ */
+onMounted(() => {
+  // 标题必须与 scripts/prerender.mjs 写进 dist/index.html 的一致，
+  // 否则客户端接管后会看到标题跳变
+  applyPageMeta({
+    title: 'OpenResume · 在线简历制作与原生 PDF 导出',
+    description:
+      '开源免费的在线简历制作平台：真实 A4 排版、四套专业模板、一键收敛单页、浏览器原生打印导出 PDF，无需注册即可开始。',
+    path: '/'
+  });
+  setJsonLd('software', softwareApplicationJsonLd());
+  setJsonLd('faq', faqJsonLd(FAQS));
+});
+
+onBeforeUnmount(() => {
+  removeJsonLd('software');
+  removeJsonLd('faq');
+});
+
+/** 模板卡片：适合行业直接取元数据里的 industry，避免首页再维护一份文案 */
 const templateCards = computed(() =>
   TEMPLATES.map((template) => ({
     ...template,
-    bestFor:
-      template.id === 'classic'
-        ? '互联网、金融、国企、传统行业'
-        : template.id === 'geek'
-          ? '前端 / 后端研发、算法、DevOps'
-          : '产品、设计、运营、跨领域求职'
+    bestFor: template.industry.join('、')
   }))
 );
 </script>
@@ -140,12 +147,11 @@ const templateCards = computed(() =>
 
     <main id="main-content" tabindex="-1" class="flex-1">
       <!-- Hero -->
-      <section class="relative pt-14 pb-16 lg:pt-20 lg:pb-20 overflow-hidden">
-        <div class="absolute inset-0 -z-10 flex items-center justify-center opacity-50" aria-hidden="true">
-          <div class="w-[560px] h-[560px] bg-primary-300/20 rounded-full blur-3xl" />
-          <div class="w-[420px] h-[420px] bg-primary-400/15 rounded-full blur-3xl -ml-32" />
-        </div>
-
+      <!--
+        首屏不再放 blur-3xl 装饰球：大半径模糊层在低端机上会触发整屏重绘，
+        且对「这份简历能直接投」这件事没有任何信息量。留白交给版式本身。
+      -->
+      <section class="pt-14 pb-16 lg:pt-20 lg:pb-20">
         <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div class="grid lg:grid-cols-2 gap-12 lg:gap-10 items-center">
             <div class="text-center lg:text-left">
@@ -231,15 +237,15 @@ const templateCards = computed(() =>
       <section id="templates" class="py-16 bg-slate-50 scroll-mt-16">
         <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div class="text-center max-w-xl mx-auto mb-10">
-            <h2 class="home-section-title text-2xl sm:text-3xl font-black text-slate-900">三套模板，覆盖常见岗位</h2>
+            <h2 class="home-section-title text-2xl sm:text-3xl font-black text-slate-900">四套模板，覆盖常见岗位</h2>
             <p class="text-sm text-slate-500 mt-2">换模板不会丢失内容，编辑过程中也能随时切换</p>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             <article
               v-for="template in templateCards"
               :key="template.id"
-              class="flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs hover:shadow-md transition"
+              class="flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs hover:shadow-md transition"
             >
               <TemplatePreview :template-id="previewTemplateId(template.id)" class="border-b border-slate-200" />
 
@@ -281,7 +287,7 @@ const templateCards = computed(() =>
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             <AppCard v-for="feature in FEATURES" :key="feature.title" class="h-full">
               <div class="w-9 h-9 rounded-lg bg-primary-50 text-primary-600 flex items-center justify-center">
-                <component :is="feature.icon" class="w-4.5 h-4.5" aria-hidden="true" />
+                <component :is="feature.icon" class="w-[18px] h-[18px]" aria-hidden="true" />
               </div>
               <h3 class="text-sm font-bold text-slate-900 mt-3">{{ feature.title }}</h3>
               <p class="text-xs text-slate-500 mt-1.5 leading-relaxed">{{ feature.desc }}</p>
@@ -295,18 +301,18 @@ const templateCards = computed(() =>
         <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div class="text-center max-w-xl mx-auto mb-10">
             <h2 class="home-section-title text-2xl sm:text-3xl font-black text-slate-900">按岗位选择起点</h2>
-            <p class="text-sm text-slate-500 mt-2">不同岗位关注的信息不同，模板侧重点也不同</p>
+            <p class="text-sm text-slate-500 mt-2">不同岗位关注的信息不同，每个示例都附带可套用的模板与写法建议</p>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-            <AppCard v-for="example in ROLE_EXAMPLES" :key="example.role" class="h-full flex flex-col">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            <AppCard v-for="example in RESUME_EXAMPLES" :key="example.slug" class="h-full flex flex-col">
               <div class="flex items-center justify-between gap-2">
-                <h3 class="text-sm font-bold text-slate-900">{{ example.role }}</h3>
-                <AppBadge tone="neutral">{{ TEMPLATES.find((t) => t.id === example.templateId)?.shortName }}</AppBadge>
+                <h3 class="text-sm font-bold text-slate-900">{{ example.name }}</h3>
+                <AppBadge tone="neutral">{{ findTemplate(example.templateId).shortName }}</AppBadge>
               </div>
               <ul class="mt-3 space-y-1.5 flex-1">
                 <li
-                  v-for="point in example.points"
+                  v-for="point in example.highlights"
                   :key="point"
                   class="text-xs text-slate-600 flex items-start gap-2 leading-relaxed"
                 >
@@ -319,13 +325,20 @@ const templateCards = computed(() =>
                 size="sm"
                 block
                 class="mt-4"
-                :aria-label="`以这个模板开始（${example.role}）`"
-                @click="startWithTemplate(example.templateId)"
+                :aria-label="`查看示例：${example.name}`"
+                @click="router.push(`/examples/${example.slug}`)"
               >
-                <span>以这个模板开始</span>
+                <span>查看示例</span>
+                <ArrowRight class="w-3.5 h-3.5" aria-hidden="true" />
               </AppButton>
             </AppCard>
           </div>
+
+          <p class="text-center mt-6">
+            <RouterLink to="/examples" class="text-xs font-semibold text-primary-700 hover:text-primary-800">
+              查看全部简历示例与写法建议 →
+            </RouterLink>
+          </p>
         </div>
       </section>
 
@@ -369,18 +382,6 @@ const templateCards = computed(() =>
       </section>
     </main>
 
-    <footer class="border-t border-slate-200 bg-white py-6">
-      <div class="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
-        <div class="flex items-center gap-2">
-          <BrandMark size="xs" />
-          <span class="font-bold text-slate-700">OpenResume</span>
-          <span>· 开源简历制作平台</span>
-        </div>
-        <p class="flex items-center gap-1.5">
-          <Zap class="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
-          <span>Vue 3 · Hono · Cloudflare Pages</span>
-        </p>
-      </div>
-    </footer>
+    <AppFooter />
   </div>
 </template>

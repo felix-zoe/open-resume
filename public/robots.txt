@@ -1,0 +1,19 @@
+# OpenResume · robots.txt
+#
+# 允许抓取所有营销页与示例页；编辑器、工作台、投递管理与 API 不索引：
+# 这些路径要么需要登录（爬虫只会拿到登录跳转），要么是用户私有数据。
+
+User-agent: *
+Allow: /
+Disallow: /editor/
+Disallow: /dashboard
+Disallow: /jobs
+Disallow: /login
+Disallow: /register
+Disallow: /api/
+
+# 分享链接是「知道才可见」的私密内容，服务端已注入 noindex，这里再加一层
+Disallow: /share/
+Disallow: /s/
+
+Sitemap: https://open-resume.pages.dev/sitemap.xml

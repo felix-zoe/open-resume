@@ -11,7 +11,7 @@ const route = useRoute();
       <Compass class="w-7 h-7" />
     </div>
 
-    <p class="text-xs font-mono font-semibold text-slate-400 tracking-widest">404</p>
+    <p class="text-xs font-mono font-semibold text-slate-500 tracking-widest">404</p>
     <h1 class="text-xl sm:text-2xl font-bold text-slate-900 mt-2">这个页面不存在</h1>
     <p class="text-sm text-slate-500 mt-2 max-w-sm leading-relaxed">
       地址 <code class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">{{ route.fullPath }}</code>

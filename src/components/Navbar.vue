@@ -8,7 +8,9 @@ import {
   FileText,
   LogOut,
   ChevronDown,
-  Plus
+  Briefcase,
+  Plus,
+  Settings
 } from 'lucide-vue-next';
 
 const authStore = useAuthStore();
@@ -68,7 +70,7 @@ onUnmounted(() => {
           class="flex items-center gap-2 p-1.5 rounded-xl hover:bg-slate-100/80 transition cursor-pointer"
         >
           <!-- 头像或首字母徽章 -->
-          <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-primary-500 to-primary-500 text-white flex items-center justify-center text-xs font-bold overflow-hidden shadow-2xs">
+          <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-primary-500 to-primary-500 text-white flex items-center justify-center text-xs font-bold overflow-hidden shadow-xs">
             <img
               v-if="authStore.user?.avatarUrl"
               :src="authStore.user.avatarUrl"
@@ -107,7 +109,7 @@ onUnmounted(() => {
               <div class="font-bold text-slate-900 truncate">
                 {{ authStore.user?.nickname || '求职者' }}
               </div>
-              <div class="text-2xs text-slate-400 font-mono truncate mt-0.5">
+              <div class="text-2xs text-slate-500 font-mono truncate mt-0.5">
                 {{ authStore.user?.email }}
               </div>
             </div>
@@ -124,12 +126,30 @@ onUnmounted(() => {
               </router-link>
 
               <router-link
+                to="/jobs"
+                @click="isMenuOpen = false"
+                class="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-700 hover:text-primary-600 hover:bg-slate-50 font-medium transition"
+              >
+                <Briefcase class="w-3.5 h-3.5 text-slate-400" />
+                <span>投递管理</span>
+              </router-link>
+
+              <router-link
                 to="/editor/new"
                 @click="isMenuOpen = false"
                 class="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-700 hover:text-primary-600 hover:bg-slate-50 font-medium transition"
               >
                 <Plus class="w-3.5 h-3.5 text-slate-400" />
                 <span>新建一份简历</span>
+              </router-link>
+
+              <router-link
+                to="/settings"
+                @click="isMenuOpen = false"
+                class="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-700 hover:text-primary-600 hover:bg-slate-50 font-medium transition"
+              >
+                <Settings class="w-3.5 h-3.5 text-slate-400" />
+                <span>账号设置</span>
               </router-link>
             </div>
 

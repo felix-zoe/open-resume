@@ -23,7 +23,7 @@ const PADDING_CLASSES = {
 
 const classes = computed(() =>
   cx(
-    'bg-white border border-slate-200 rounded-xl shadow-2xs',
+    'bg-white border border-slate-200 rounded-xl shadow-xs',
     PADDING_CLASSES[props.padding],
     props.interactive &&
       'cursor-pointer transition-all hover:border-slate-300 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40',

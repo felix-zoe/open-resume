@@ -1,17 +1,18 @@
 import { test, expect, collectPageErrors } from './fixtures/mockApi';
 
 test.describe('首页 @s1', () => {
-  test('渲染三套真实模板预览，而不是骨架截图 @s1', async ({ page }) => {
+  test('渲染四套真实模板预览，而不是骨架截图 @s1', async ({ page }) => {
     const errors = collectPageErrors(page);
     await page.goto('/');
 
     const previews = page.locator('#templates .template-preview');
-    await expect(previews).toHaveCount(3);
+    await expect(previews).toHaveCount(4);
 
     // 预览里挂载的是真实模板组件
     await expect(page.locator('#templates .classic-template')).toHaveCount(1);
     await expect(page.locator('#templates .geek-template')).toHaveCount(1);
     await expect(page.locator('#templates .modern-template')).toHaveCount(1);
+    await expect(page.locator('#templates .ats-template')).toHaveCount(1);
 
     // 预览不可交互、对读屏隐藏（只是装饰）
     await expect(previews.first()).toHaveAttribute('aria-hidden', 'true');
@@ -21,11 +22,14 @@ test.describe('首页 @s1', () => {
   test('区块顺序为 Hero → 三步 → 模板 → 能力 → 岗位 → FAQ @s1', async ({ page }) => {
     await page.goto('/');
 
+    // 首页是懒加载 chunk，先等第一个区块标题出现，再取全部标题
+    await expect(page.locator('main h2.home-section-title').first()).toBeVisible();
+
     // 模板预览内部也有 h2（简历章节标题），这里只看页面级标题
     const headings = await page.locator('main h2.home-section-title').allInnerTexts();
     expect(headings).toEqual([
       '三步完成一份简历',
-      '三套模板，覆盖常见岗位',
+      '四套模板，覆盖常见岗位',
       '简历之外，真正影响投递的部分',
       '按岗位选择起点',
       '常见问题'

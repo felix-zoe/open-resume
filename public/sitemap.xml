@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OpenResume · sitemap.xml
+
+  只收录**公开可索引**的页面：首页、示例库、示例详情、法律页。
+  编辑器/工作台/投递管理需要登录，分享页是私密内容，都不在这里。
+  示例条目必须与 src/constants/examples.ts 的 RESUME_EXAMPLES 一致，
+  由 scripts/check-static.mjs 的 sitemap-examples 规则守护（新增示例忘记补这里会失败）。
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://open-resume.pages.dev/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://open-resume.pages.dev/examples</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://open-resume.pages.dev/examples/frontend</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://open-resume.pages.dev/examples/backend</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://open-resume.pages.dev/examples/product</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://open-resume.pages.dev/examples/operations</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://open-resume.pages.dev/examples/new-grad</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://open-resume.pages.dev/examples/foreign-company</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://open-resume.pages.dev/privacy</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://open-resume.pages.dev/terms</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+</urlset>
