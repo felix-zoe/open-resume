@@ -16,8 +16,6 @@
     "test:e2e:s0": "playwright test --grep @s0",
     "test:e2e:s1": "playwright test --grep @s1",
     "check:static": "node scripts/check-static.mjs",
-    "check:env": "node scripts/check-env.mjs",
-    "check:env:remote": "node scripts/check-env.mjs --remote",
     "verify": "npm run check:static && npm run test:unit:run && npm run build && npm run test:e2e",
     "verify:s0": "npm run check:static && npm run test:unit:run && npm run build && npm run test:e2e:s0",
     "verify:s1": "npm run check:static && npm run test:unit:run && npm run build && npm run test:e2e:s1",
@@ -29,9 +27,7 @@
     "db:migrate:remote": "node scripts/migrate.mjs --remote",
     "db:migrate:dry": "node scripts/migrate.mjs --local --dry-run",
     "db:purge": "node scripts/purge-accounts.mjs",
-    "db:purge:remote": "node scripts/purge-accounts.mjs --remote",
-    "check:alerts": "node scripts/check-alerts.mjs",
-    "check:alerts:local": "node scripts/check-alerts.mjs --local"
+    "db:purge:remote": "node scripts/purge-accounts.mjs --remote"
   },
   "dependencies": {
     "docx": "^9.14.0",

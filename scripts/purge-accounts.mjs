@@ -9,8 +9,8 @@
  *   node scripts/purge-accounts.mjs --local
  *   node scripts/purge-accounts.mjs --remote
  *
- * 生产建议用 GitHub Actions 每日跑一次（见 .github/workflows/purge.yml），
- * 或挂 Cloudflare Cron Trigger。本地跑 `--remote` 需要已登录 wrangler。
+ * 生产建议挂 Cloudflare Cron Trigger 每日跑一次。
+ * 本地跑 `--remote` 需要已登录 wrangler。
  */
 
 import { execFileSync } from 'node:child_process';

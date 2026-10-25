@@ -18,7 +18,7 @@
 - 🌐 **中英双语简历**：同一份简历可切换中/英文渲染（模块标题、日期格式、分隔符），内容一字不动；技能支持「整句描述 / 标签胶囊」两种形态，导出同步跟随语言。
 - 🔎 **示例库与搜索友好**：6 个岗位示例页用真实模板渲染并附写法建议；`robots.txt`、`sitemap.xml` 与构建期 head 预渲染（`SoftwareApplication`/`FAQPage`/`BreadcrumbList` 结构化数据），营销页不依赖 JS 也能被正确抓取。
 - 📴 **可安装、可离线**：装到桌面后断网也能打开编辑器继续写、照常打印；应用壳与预渲染页全部预缓存，简历数据不进缓存；有新版本只提示不自动刷新。
-- 📈 **出问题能立刻知道**：前端错误与 Web Vitals（LCP/CLS/INP）上报到自建接口，业务埋点只记次数不记身份；服务端每个请求带 `X-Request-Id` 并输出结构化日志；`npm run check:alerts` 按导出失败率 / 登录失败率 / 5xx 阈值告警。不接任何第三方统计脚本。
+- 📈 **出问题能立刻知道**：前端错误与 Web Vitals（LCP/CLS/INP）上报到自建接口，业务埋点只记次数不记身份；服务端每个请求带 `X-Request-Id` 并输出结构化日志。不接任何第三方统计脚本。
 - 🔐 **账号自己做主**：设置页可改密码（需校验当前密码）、一键导出全部数据为 JSON（不含密码哈希与访客统计）、申请注销并留 7 天反悔期（期间登录即自动撤销），到期由登录惰性删除或 `npm run db:purge:remote` 定时清理。
 - ⚡ **零服务器成本云原生**：
   - 前端托管：Cloudflare Pages 全球 Anycast CDN 边缘分发
@@ -112,13 +112,6 @@ npm run dev               # → http://localhost:5173
 > **跨域**：`/api` 只放行 `APP_ORIGIN` 里列出的来源（逗号分隔），未配置时不放行任何跨域来源。
 > 本地 Vite（5173）代理到 8787 时属于服务端到服务端转发，不需要额外配置；
 > 只有在浏览器里直接请求 8787 时才需要 `APP_ORIGIN=http://localhost:5173`。
->
-> 部署前可以跑一次环境自检，缺 Secret 会直接失败并给出修复命令：
->
-> ```bash
-> npm run check:env           # 检查本地 .dev.vars
-> npm run check:env:remote    # 检查线上已注入的 Secret 列表
-> ```
 
 ### 4. 生产打包
 ```bash
@@ -139,7 +132,7 @@ npm run build
    - **D1 database bindings**: 变量名 `DB` 绑定您的 D1 实例。
    - **R2 bucket bindings**: 变量名 `BUCKET` 绑定您的 R2 存储桶。
 5. 在 **Settings** -> **Environment variables** 中确认 `JWT_SECRET` 已作为 Secret 注入
-   （不要依赖 `wrangler.toml` 里的明文值），然后跑 `npm run check:env:remote` 自检。
+   （不要依赖 `wrangler.toml` 里的明文值）。
 6. 数据库结构变更通过迁移增量升级，不要直接重跑 `schema.sql`：
 
    ```bash
@@ -148,7 +141,7 @@ npm run build
 
 7. 配置每日清理（可选但建议）：注销冷静期到期的账号、180 天前的访问记录、过期的限流计数都由同一个脚本回收。
    登录时的惰性删除只能覆盖「注销后又回来登录」的人，**注销后不再回来的账号必须靠定时任务**。
-   可在 Cloudflare Cron Trigger 或 GitHub Actions 里每天跑一次：
+   可在 Cloudflare Cron Trigger 里每天跑一次：
 
    ```bash
    npm run db:purge:remote -- --dry-run   # 先看会删什么
